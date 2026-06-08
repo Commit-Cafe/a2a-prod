@@ -1,0 +1,58 @@
+# ============================================================
+# LiteLLM Proxy 配置 — a2a-prod
+# 文档：https://docs.litellm.ai/docs/proxy/configs
+# 与 .env.example 的 GLM_BASE_URL / DEEPSEEK_BASE_URL / MINIMAX_BASE_URL 对齐
+# ============================================================
+
+model_list:
+  # ------------------------------------------------------------
+  # GLM（智谱）— 走 OpenAI 兼容协议
+  # 注意：litellm 用 model 名做路由，openai/ 前缀表示走 OpenAI 兼容协议
+  # ------------------------------------------------------------
+  - model_name: glm-5.1
+    litellm_params:
+      model: openai/glm-5.1
+      api_base: os.environ/GLM_BASE_URL
+      api_key: os.environ/GLM_API_KEY
+      timeout: 60
+      retry: 3
+
+  # ------------------------------------------------------------
+  # DeepSeek
+  # 模型名 deepseek-v4-pro：用户指定（2026-06-08）
+  # ------------------------------------------------------------
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: openai/deepseek-v4-pro
+      api_base: os.environ/DEEPSEEK_BASE_URL
+      api_key: os.environ/DEEPSEEK_API_KEY
+      timeout: 60
+      retry: 3
+
+  # ------------------------------------------------------------
+  # MiniMax
+  # MiniMax-M3 文档：https://www.minimaxi.com/document
+  # ------------------------------------------------------------
+  - model_name: MiniMax-M3
+    litellm_params:
+      model: openai/MiniMax-M3
+      api_base: os.environ/MINIMAX_BASE_URL
+      api_key: os.environ/MINIMAX_API_KEY
+      timeout: 60
+      retry: 3
+
+# ============================================================
+# 通用设置
+# ============================================================
+general_settings:
+  # 主密钥（访问 /v1/* 需要 Authorization: Bearer <key>）
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # LiteLLM 自身日志
+  telemetry: false
+
+litellm_settings:
+  # 请求失败时最多重试 2 次（model_list 里每家又配了 retry:3，取最小）
+  num_retries: 2
+  request_timeout: 60
+  # 关掉 LiteLLM 自研的 callback，避免控制台噪音
+  drop_params: true

@@ -1,0 +1,95 @@
+# ============================================================
+# PodDisruptionBudget（PDB）
+# 详见 SPEC §3.10.8
+#
+# 滚动升级 + node drain 时必须保留的最小可用副本数
+# ============================================================
+---
+# LiteLLM：至少 1 副本
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: litellm
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: litellm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: litellm
+---
+# Orchestrator：至少 1 副本
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: orchestrator
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: orchestrator
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: orchestrator
+---
+# 3 Agent：每个至少 1 副本
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: glm-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: glm-agent
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: glm-agent
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: deepseek-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: deepseek-agent
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: deepseek-agent
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: minimax-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: minimax-agent
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minimax-agent
+---
+# Langfuse Web：至少 1 副本
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: langfuse-web
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: langfuse
+    app.kubernetes.io/name: langfuse-web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-web
+---
+# 注意：Langfuse 6 子组件中 postgres / clickhouse / redis / minio 都是单实例，
+# 不设 PDB（设了也没意义；升级时主动 Recreate 策略 + 协调 1 节点）

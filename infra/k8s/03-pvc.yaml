@@ -1,0 +1,88 @@
+# ============================================================
+# PersistentVolumeClaim 列表
+# 详见 SPEC §3.10.4
+#
+# 仅 Langfuse 子组件需要持久化（Postgres / ClickHouse / MinIO）；
+# LiteLLM / 3 Agent / Orchestrator / MCP server / Open WebUI 是无状态服务
+# ============================================================
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-postgres-data
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: langfuse
+    a2a-prod.io/storage: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-clickhouse-data
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: langfuse
+    a2a-prod.io/storage: clickhouse
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi  # trace OLAP 数据量大
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-minio-data
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: langfuse
+    a2a-prod.io/storage: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: open-webui-data
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: open-webui
+    a2a-prod.io/storage: open-webui
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+# 可选：workspace 共享卷（多 Agent 共享沙盒）
+# 启用方法：去掉下面注释；同时在 Agent Deployment 里 mount 这个 PVC
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: a2a-prod-workspace
+#   namespace: a2a-prod
+#   labels:
+#     app.kubernetes.io/part-of: a2a-prod
+# spec:
+#   accessModes:
+#     - ReadWriteMany  # 多 Pod 同时挂载
+#   resources:
+#     requests:
+#       storage: 10Gi
+#   storageClassName: standard  # 需要 RWX 支持

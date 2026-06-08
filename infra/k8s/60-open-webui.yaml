@@ -1,0 +1,138 @@
+# ============================================================
+# Open WebUI
+# 详见 SPEC §3.9 / §3.10.3
+# ============================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: open-webui
+    app.kubernetes.io/name: open-webui
+    app.kubernetes.io/version: "0.3.0"
+spec:
+  replicas: 1  # WebUI 是有状态服务（持久化用户/会话），用单实例
+  strategy:
+    type: Recreate  # 单实例 + PVC，不能 RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: open-webui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: open-webui
+        app.kubernetes.io/name: open-webui
+        app.kubernetes.io/version: "0.3.0"
+    spec:
+      serviceAccountName: open-webui
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: open-webui
+          image: ghcr.io/open-webui/open-webui:main
+          imagePullPolicy: Always  # upstream 频繁更新，跟 latest
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # P5: 指向 orchestrator 内网服务名
+            - name: OPENAI_API_BASE_URL
+              value: "http://orchestrator:12080/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LITELLM_MASTER_KEY
+            - name: DEFAULT_MODELS
+              value: "auto,glm-agent,deepseek-agent,minimax-agent"
+            - name: SCARF_NO_ANALYTICS
+              value: "true"
+            - name: DO_NOT_TRACK
+              value: "true"
+            - name: PORT
+              value: "8080"
+            - name: TZ
+              value: UTC
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1
+              memory: 2Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-webui-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-webui
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: open-webui
+    app.kubernetes.io/name: open-webui
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: open-webui
+---
+# Ingress 模板（注释形式给出）
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: open-webui
+#   namespace: a2a-prod
+#   annotations:
+#     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#     - host: chat.example.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: open-webui
+#                 port:
+#                   number: 8080

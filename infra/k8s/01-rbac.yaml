@@ -1,0 +1,102 @@
+# ============================================================
+# ServiceAccount + Role + RoleBinding
+# 详见 SPEC §3.10.5 / ADR-0010
+#
+# 设计原则：每个 workload 独立 SA + 最小权限
+# ============================================================
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orchestrator
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: orchestrator
+automountServiceAccountToken: false  # 默认服务不需要 API server
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: glm-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    a2a-prod.io/agent: glm-agent
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deepseek-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    a2a-prod.io/agent: deepseek-agent
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: minimax-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    a2a-prod.io/agent: minimax-agent
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: litellm
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: litellm
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-filesystem
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    a2a-prod.io/mcp: filesystem
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-fetch
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    a2a-prod.io/mcp: fetch
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-shell
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    a2a-prod.io/mcp: shell
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: langfuse-web
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: langfuse
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: open-webui
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: open-webui
+automountServiceAccountToken: false

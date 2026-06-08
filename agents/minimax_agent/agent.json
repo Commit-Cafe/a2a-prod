@@ -1,0 +1,36 @@
+{
+  "capabilities": {
+    "pushNotifications": false,
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "MiniMax-M3 程序员（主力代码编写）Agent",
+  "name": "minimax-agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "团队主力码农角色，把方案翻译成可运行、可读、可测试的工程级代码。输出最小可运行示例 + 关键设计说明 + 必要 pytest 用例。",
+      "examples": [
+        "用 Python 实现线程安全的 LRU 缓存，并附 pytest 用例",
+        "把这段 JavaScript 回调风格代码重构成 async/await",
+        "在 workspace/samples/ 下写一个 thread_safe_lru.py 并跑 pytest 验证"
+      ],
+      "id": "code-writing",
+      "name": "工程级代码实现",
+      "tags": [
+        "coding",
+        "engineering",
+        "implementation",
+        "minimax"
+      ]
+    }
+  ],
+  "url": "http://localhost:12003/",
+  "version": "0.1.0"
+}

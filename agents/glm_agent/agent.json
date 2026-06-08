@@ -1,0 +1,36 @@
+{
+  "capabilities": {
+    "pushNotifications": false,
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "GLM-5.1 技术总监与代码审查 Agent",
+  "name": "glm-agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "站在技术总监视角评审代码：正确性、可读性、安全性、性能、可维护性。输出三级问题清单（阻塞/建议/优化）+ 可落地的改进建议。",
+      "examples": [
+        "审查这段 Python 代码：def divide(a, b): return a / b",
+        "评估这个 REST API 设计的扩展性与版本兼容性",
+        "读取 workspace/samples/calc.py 并指出代码风格问题"
+      ],
+      "id": "code-review",
+      "name": "代码审查与质量把关",
+      "tags": [
+        "code-review",
+        "quality",
+        "security",
+        "glm"
+      ]
+    }
+  ],
+  "url": "http://localhost:12001/",
+  "version": "0.1.0"
+}

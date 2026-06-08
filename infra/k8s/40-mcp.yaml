@@ -1,0 +1,282 @@
+# ============================================================
+# 3 个 MCP Server（filesystem / fetch / shell）
+# 详见 SPEC §3.7 / §3.10.3
+# ============================================================
+---
+# ---------------- Filesystem MCP ----------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-filesystem
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/name: mcp-filesystem
+    a2a-prod.io/mcp: filesystem
+spec:
+  replicas: 1  # MCP 内部用 SQLite-like 索引；用 StatefulSet 更合适，但 P6 简化为单实例
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-filesystem
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: mcp
+        app.kubernetes.io/name: mcp-filesystem
+        a2a-prod.io/mcp: filesystem
+    spec:
+      serviceAccountName: mcp-filesystem
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: mcp
+          image: a2a-prod-mcp-filesystem:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 12101
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: WORKSPACE_ROOT
+              value: "/workspace"
+            - name: MCP_PORT
+              value: "12101"
+            - name: TZ
+              value: UTC
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-filesystem
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/name: mcp-filesystem
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12101
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: mcp-filesystem
+---
+# ---------------- Fetch MCP ----------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-fetch
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/name: mcp-fetch
+    a2a-prod.io/mcp: fetch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-fetch
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: mcp
+        app.kubernetes.io/name: mcp-fetch
+        a2a-prod.io/mcp: fetch
+    spec:
+      serviceAccountName: mcp-fetch
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: mcp
+          image: a2a-prod-mcp-fetch:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 12102
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: MCP_PORT
+              value: "12102"
+            - name: TZ
+              value: UTC
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-fetch
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/name: mcp-fetch
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12102
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: mcp-fetch
+---
+# ---------------- Shell MCP ----------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-shell
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/name: mcp-shell
+    a2a-prod.io/mcp: shell
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-shell
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: mcp
+        app.kubernetes.io/name: mcp-shell
+        a2a-prod.io/mcp: shell
+    spec:
+      serviceAccountName: mcp-shell
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: mcp
+          image: a2a-prod-mcp-shell:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 12103
+          # Shell MCP MUST 有 allowlist + 元字符过滤 + timeout
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: MCP_PORT
+              value: "12103"
+            - name: WORKSPACE_ROOT
+              value: "/workspace"
+            - name: TZ
+              value: UTC
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-shell
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/name: mcp-shell
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12103
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: mcp-shell

@@ -1,0 +1,56 @@
+# ============================================================
+# Open WebUI 独立 compose（P5 阶段，详见 ADR-0009 / SPEC §3.9）
+#
+# 用途：
+# - 把 Open WebUI 单服务抽成独立 compose，便于"接已有 orchestrator"场景
+#   （例如：orchestrator 在远程 K8s 跑，本地只想用前端）
+# - 与主 infra/docker-compose.yml 解耦，避免混改主栈
+#
+# 启动：
+#   cp .env.example .env
+#   # 编辑 .env 填入 OPENAI_API_BASE_URL / OPENAI_API_KEY
+#   docker compose up -d
+#
+# 默认网络名 a2a-prod-net（与主 compose 一致），保证能直接通过 service 名访问
+# ============================================================
+
+name: a2a-prod-frontend
+
+networks:
+  a2a-prod-net:
+    name: a2a-prod-net
+    driver: bridge
+    external: true  # 复用主 compose 已建的网络
+
+volumes:
+  open_webui_data:
+    name: a2a-prod-open-webui-data
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: a2a-prod-open-webui
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${OPEN_WEBUI_PORT:-8080}:8080"
+    volumes:
+      - open_webui_data:/app/backend/data
+    environment:
+      # 关键配置：指向 a2a-prod orchestrator 的 OpenAI 兼容端点
+      # 容器内必须走 service 名，不能用 localhost（这是另一个容器）
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-http://orchestrator:12080/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${LITELLM_MASTER_KEY}}
+      # 默认模型下拉框
+      DEFAULT_MODELS: "auto,glm-agent,deepseek-agent,minimax-agent"
+      # 关闭 telemetry
+      SCARF_NO_ANALYTICS: "true"
+      DO_NOT_TRACK: "true"
+      PORT: 8080
+      TZ: UTC
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

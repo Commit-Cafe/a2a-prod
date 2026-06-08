@@ -1,0 +1,186 @@
+# ============================================================
+# Orchestrator + Ingress
+# 详见 SPEC §3.10.3 / §3.9
+# ============================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/name: orchestrator
+    app.kubernetes.io/version: "0.7.0"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: orchestrator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: orchestrator
+        app.kubernetes.io/name: orchestrator
+        app.kubernetes.io/version: "0.7.0"
+    spec:
+      serviceAccountName: orchestrator
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: orchestrator
+          image: a2a-prod-orchestrator:0.7.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 12080
+          # P5: 健康检查用 OpenAI 兼容 /v1/models
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: PORT
+              value: "12080"
+            - name: LITELLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LITELLM_BASE_URL
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LITELLM_MASTER_KEY
+            - name: ORCHESTRATOR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: ORCHESTRATOR_API_KEY
+                  optional: true
+            # ---- 3 Agent URL ----
+            - name: GLM_AGENT_URL
+              value: "http://glm-agent:12001/"
+            - name: DEEPSEEK_AGENT_URL
+              value: "http://deepseek-agent:12002/"
+            - name: MiniMax_AGENT_URL
+              value: "http://minimax-agent:12003/"
+            # P4: Langfuse OTEL
+            - name: LANGFUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LANGFUSE_HOST
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://langfuse-web:3000/api/public/otel"
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_SECRET_KEY
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: TZ
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: orchestrator
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12080
+      targetPort: http
+  selector:
+    app.kubernetes.io/component: orchestrator
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orchestrator
+  namespace: a2a-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orchestrator
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# Ingress 模板（注释形式给出；按需取消注释并填入真实 hostname）
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: orchestrator
+#   namespace: a2a-prod
+#   annotations:
+#     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+#     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#     - host: orchestrator.example.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: orchestrator
+#                 port:
+#                   number: 12080

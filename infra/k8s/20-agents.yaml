@@ -1,0 +1,498 @@
+# ============================================================
+# 3 个 A2A Agent（GLM / DeepSeek / MiniMax）
+# 详见 SPEC §3.10.3
+#
+# 三个 Agent 部署结构完全相同（同一份 Dockerfile + 不同 build-arg / 启动参数），
+# 这里用三组 Deployment + Service 分别管理，便于独立扩缩
+# ============================================================
+---
+# ---------------- GLM Agent ----------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glm-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: glm-agent
+    a2a-prod.io/agent: glm-agent
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: glm-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/name: glm-agent
+        a2a-prod.io/agent: glm-agent
+        app.kubernetes.io/version: "0.1.0"
+    spec:
+      serviceAccountName: glm-agent
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: agent
+          image: a2a-prod-agent-glm:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 12001
+              protocol: TCP
+          # A2A 协议：Agent Card 端点
+          startupProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: AGENT_NAME
+              value: "glm-agent"
+            - name: AGENT_PORT
+              value: "12001"
+            - name: LITELLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LITELLM_BASE_URL
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LITELLM_MASTER_KEY
+            - name: MCP_FILESYSTEM_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: MCP_FILESYSTEM_URL
+            - name: MCP_FETCH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: MCP_FETCH_URL
+            # P4: Langfuse OTEL（必须用容器名，不用 localhost）
+            - name: LANGFUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LANGFUSE_HOST
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://langfuse-web:3000/api/public/otel"
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_SECRET_KEY
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: TZ
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: glm-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: glm-agent
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12001
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: glm-agent
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: glm-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/name: glm-agent
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: glm-agent
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# ---------------- DeepSeek Agent ----------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepseek-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: deepseek-agent
+    a2a-prod.io/agent: deepseek-agent
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: deepseek-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/name: deepseek-agent
+        a2a-prod.io/agent: deepseek-agent
+        app.kubernetes.io/version: "0.1.0"
+    spec:
+      serviceAccountName: deepseek-agent
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: agent
+          image: a2a-prod-agent-deepseek:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 12002
+          startupProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: AGENT_NAME
+              value: "deepseek-agent"
+            - name: AGENT_PORT
+              value: "12002"
+            - name: LITELLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LITELLM_BASE_URL
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LITELLM_MASTER_KEY
+            - name: MCP_FILESYSTEM_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: MCP_FILESYSTEM_URL
+            - name: MCP_FETCH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: MCP_FETCH_URL
+            - name: LANGFUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LANGFUSE_HOST
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://langfuse-web:3000/api/public/otel"
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_SECRET_KEY
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: TZ
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: deepseek-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: deepseek-agent
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12002
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: deepseek-agent
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: deepseek-agent
+  namespace: a2a-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: deepseek-agent
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# ---------------- MiniMax Agent ----------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minimax-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: minimax-agent
+    a2a-prod.io/agent: minimax-agent
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minimax-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/name: minimax-agent
+        a2a-prod.io/agent: minimax-agent
+        app.kubernetes.io/version: "0.1.0"
+    spec:
+      serviceAccountName: minimax-agent
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: agent
+          image: a2a-prod-agent-minimax:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 12003
+          startupProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /.well-known/agent.json
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: AGENT_NAME
+              value: "minimax-agent"
+            - name: AGENT_PORT
+              value: "12003"
+            - name: LITELLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LITELLM_BASE_URL
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LITELLM_MASTER_KEY
+            # P3: MiniMax Agent 接入全部 3 个 MCP（含 write_file / run_command）
+            - name: MCP_FILESYSTEM_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: MCP_FILESYSTEM_URL
+            - name: MCP_FETCH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: MCP_FETCH_URL
+            - name: MCP_SHELL_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: MCP_SHELL_URL
+            - name: LANGFUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LANGFUSE_HOST
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://langfuse-web:3000/api/public/otel"
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_SECRET_KEY
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: TZ
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minimax-agent
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/name: minimax-agent
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12003
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: minimax-agent
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: minimax-agent
+  namespace: a2a-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: minimax-agent
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

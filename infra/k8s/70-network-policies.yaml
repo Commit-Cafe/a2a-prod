@@ -1,0 +1,191 @@
+# ============================================================
+# NetworkPolicy（与 00-namespace.yaml 的 default-deny-all 配合）
+# 详见 SPEC §3.10.7
+#
+# 设计原则：
+# - 默认 deny-all（00-namespace.yaml）
+# - 本文件按"显式 allow"原则逐条放行
+# - Egress 必须放行 DNS（kube-dns）+ 上游 LLM API（出公网）
+# ============================================================
+---
+# ---- 通用放行：DNS + 外部 HTTPS 出站（所有 a2a-prod 内部服务）----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-and-egress-https
+  namespace: a2a-prod
+spec:
+  podSelector: {}  # 所有 Pod
+  policyTypes:
+    - Egress
+  egress:
+    # kube-dns / CoreDNS（53/UDP + 53/TCP）
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 上游 LLM API（开放 HTTPS 出站，集群有 NAT 即可）
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+---
+# ---- LiteLLM：允许 3 Agent + Orchestrator 访问 ----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-litellm-ingress
+  namespace: a2a-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: litellm
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: agent
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: orchestrator
+      ports:
+        - protocol: TCP
+          port: 4000
+---
+# ---- 3 Agent：仅允许 Orchestrator 访问 ----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-agent-ingress
+  namespace: a2a-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: orchestrator
+      ports:
+        - protocol: TCP
+          port: 12001
+        - protocol: TCP
+          port: 12002
+        - protocol: TCP
+          port: 12003
+---
+# ---- Orchestrator：允许 Open WebUI + 同 namespace 任意服务访问 ----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-orchestrator-ingress
+  namespace: a2a-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: orchestrator
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: open-webui
+        - podSelector: {}  # 同 namespace 测试/CI 也能调
+      ports:
+        - protocol: TCP
+          port: 12080
+---
+# ---- 3 MCP Server：仅允许 3 Agent 访问（隔离）----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mcp-ingress
+  namespace: a2a-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: mcp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: agent
+      ports:
+        - protocol: TCP
+          port: 12101
+        - protocol: TCP
+          port: 12102
+        - protocol: TCP
+          port: 12103
+---
+# ---- Langfuse Web：允许 3 Agent / LiteLLM / Orchestrator + Ingress（外网）----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-langfuse-ingress
+  namespace: a2a-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: langfuse
+      app.kubernetes.io/name: langfuse-web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: agent
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: orchestrator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: litellm
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+# ---- Open WebUI：允许 Ingress Controller + 同 namespace 调用 ----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-open-webui-ingress
+  namespace: a2a-prod
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: open-webui
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx  # nginx-ingress 默认 ns
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080

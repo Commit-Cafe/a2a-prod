@@ -1,0 +1,67 @@
+# ============================================================
+# Namespace + ResourceQuota + LimitRange
+# 详见 SPEC §3.10 / ADR-0010
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: a2a-prod
+  labels:
+    app.kubernetes.io/part-of: a2a-prod
+    app.kubernetes.io/managed-by: kustomize
+    name: a2a-prod
+---
+# 整个 namespace 的资源上限（防意外 OOM 把节点打死）
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: a2a-prod-quota
+  namespace: a2a-prod
+spec:
+  hard:
+    # CPU / 内存总配额（按 4 节点 8c/16GiB 估算）
+    requests.cpu: "32"
+    requests.memory: 64Gi
+    limits.cpu: "64"
+    limits.memory: 128Gi
+    # 对象数量上限（防失控）
+    pods: "100"
+    services: "50"
+    secrets: "50"
+    configmaps: "50"
+    persistentvolumeclaims: "20"
+---
+# 默认 LimitRange（任何未显式声明 limit 的 Pod 都会落到这里）
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: a2a-prod-defaults
+  namespace: a2a-prod
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "1"
+        memory: 1Gi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "4"
+        memory: 8Gi
+---
+# 命名空间默认 deny-all 网络策略（由 70-network-policies.yaml 显式放行）
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: a2a-prod
+  annotations:
+    # 注意：本 NetworkPolicy 必须与 70-network-policies.yaml 中的「显式放行」策略配合
+    # 才能让 Pod 正常通信；单独使用会断网
+    a2a-prod.io/role: "baseline-deny"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

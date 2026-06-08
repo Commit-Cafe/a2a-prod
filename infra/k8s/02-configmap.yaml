@@ -1,0 +1,101 @@
+# ============================================================
+# ConfigMap 集中配置
+# 详见 SPEC §3.10.6
+#
+# 设计原则：所有可公开的配置（无敏感信息）走 ConfigMap；
+# 敏感信息（API Key / 数据库密码）走 Secret（secrets.yaml.example）
+# ============================================================
+---
+# LiteLLM Proxy 配置（与 infra/litellm/config.yaml 内容一致）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: litellm
+data:
+  config.yaml: |
+    # ============================================================
+    # a2a-prod LiteLLM Proxy 配置（K8s 部署版）
+    # 与 docker-compose 版本字段一致；如改一处须同步两处
+    # ============================================================
+    model_list:
+      - model_name: glm-4.6
+        litellm_params:
+          model: openai/glm-4.6
+          api_key: os.environ/GLM_API_KEY
+          api_base: os.environ/GLM_API_BASE
+      - model_name: deepseek-chat
+        litellm_params:
+          model: openai/deepseek-chat
+          api_key: os.environ/DEEPSEEK_API_KEY
+          api_base: os.environ/DEEPSEEK_API_BASE
+      - model_name: MiniMax-M3
+        litellm_params:
+          model: openai/MiniMax-M3
+          api_key: os.environ/MiniMax_API_KEY
+          api_base: os.environ/MiniMax_API_BASE
+
+    router_settings:
+      num_retries: 3
+      timeout: 60
+      allowed_fails: 3
+      cooldown_time: 30
+
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+
+    litellm_settings:
+      telemetry: False
+      drop_params: True
+
+    # P4: Langfuse 回调（写入 OTEL，环境变量从 Secret 注入）
+    callbacks: ["langfuse_otel"]
+---
+# Langfuse Web 配置（开发环境初始 org/project + 默认 PK/SK）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: langfuse-web-env
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: langfuse
+data:
+  # 容器启动时 init script 会用这些变量自动建 org/project
+  LANGFUSE_INIT_ORG_ID: "a2a-prod"
+  LANGFUSE_INIT_ORG_NAME: "a2a-prod"
+  LANGFUSE_INIT_PROJECT_ID: "default"
+  LANGFUSE_INIT_PROJECT_NAME: "Default"
+  LANGFUSE_INIT_USER_EMAIL: "admin@a2a-prod.local"
+  LANGFUSE_INIT_USER_NAME: "a2a-prod admin"
+  NEXTAUTH_URL: "http://langfuse.a2a-prod.local:3000"
+  LANGFUSE_HOST: "http://langfuse-web:3000"
+  # 注：DATABASE_URL / CLICKHOUSE_URL / REDIS_URL 含密码，必须从 Secret 注入
+  # 详见 50-langfuse.yaml 中 Deployment 的 env 列表
+  CLICKHOUSE_URL: "http://langfuse-clickhouse:8123"
+  CLICKHOUSE_USER: "clickhouse"
+  REDIS_URL: "redis://langfuse-redis:6379"
+  S3_ENDPOINT_URL: "http://langfuse-minio:9000"
+  S3_BUCKET_NAME: "langfuse"
+  S3_REGION: "auto"
+  TELEMETRY_ENABLED: "false"
+---
+# 共享的代理路由 host（生产可改）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: a2a-prod-shared
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/part-of: a2a-prod
+data:
+  # K8s 集群内服务名（与 docker-compose service 名对齐）
+  LITELLM_BASE_URL: "http://litellm:4000"
+  ORCHESTRATOR_BASE_URL: "http://orchestrator:12080"
+  MCP_FILESYSTEM_URL: "http://mcp-filesystem:12101/mcp"
+  MCP_FETCH_URL: "http://mcp-fetch:12102/mcp"
+  MCP_SHELL_URL: "http://mcp-shell:12103/mcp"
+  LANGFUSE_HOST: "http://langfuse-web:3000"
+  # 时区
+  TZ: "UTC"

@@ -1,0 +1,36 @@
+{
+  "capabilities": {
+    "pushNotifications": false,
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "DeepSeek 产品经理与技术总监 Agent",
+  "name": "deepseek-agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "产品经理视角理解用户真实意图 + 技术总监视角设计方案。输出需求复述、澄清问题、候选方案 + 推荐 + 权衡点、MVP 范围。",
+      "examples": [
+        "用户想要一个 SSO 系统，帮我拆解需求并给技术方案",
+        "我们要做支付模块，技术选型怎么定（Stripe vs 自研）？",
+        "读 workspace/samples/calc.py 评估它的扩展性设计方案"
+      ],
+      "id": "requirement-analysis",
+      "name": "需求分析与技术方案",
+      "tags": [
+        "requirement",
+        "architecture",
+        "decision",
+        "deepseek"
+      ]
+    }
+  ],
+  "url": "http://localhost:12002/",
+  "version": "0.1.0"
+}

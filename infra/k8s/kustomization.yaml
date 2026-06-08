@@ -1,0 +1,93 @@
+# ============================================================
+# Kustomize 入口：infra/k8s/
+# 详见 SPEC §3.10 / ADR-0010
+#
+# 用法：
+#   # 1. 准备 Secret（不要把真实 secrets.yaml 提交到 git）
+#   cp secrets.yaml.example secrets.yaml
+#   vim secrets.yaml  # 替换所有 REPLACE_ME
+#
+#   # 2. 应用全部
+#   kubectl apply -k infra/k8s/
+#
+#   # 3. 单独 apply 某文件（用于调试）
+#   kubectl apply -f infra/k8s/30-orchestrator.yaml
+#
+#   # 4. 验证
+#   kubectl -n a2a-prod get all
+#   kubectl -n a2a-prod wait --for=condition=ready pod -l app.kubernetes.io/component=orchestrator
+# ============================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 默认 namespace 全部资源都进 a2a-prod
+namespace: a2a-prod
+
+# 资源加载顺序（按编号）
+resources:
+  - 00-namespace.yaml     # Namespace + ResourceQuota + LimitRange + default-deny NetworkPolicy
+  - 01-rbac.yaml          # ServiceAccount
+  - 02-configmap.yaml     # ConfigMap（litellm config / langfuse web env / shared）
+  - 03-pvc.yaml           # PersistentVolumeClaim
+  - secrets.yaml          # ⚠ Secret 单独维护（gitignore）；不在 resources 列表中
+  - 10-litellm.yaml       # LiteLLM Deployment + Service + HPA
+  - 20-agents.yaml        # 3 Agent Deployment + Service + HPA
+  - 30-orchestrator.yaml  # Orchestrator Deployment + Service + HPA
+  - 40-mcp.yaml           # 3 MCP Deployment + Service
+  - 50-langfuse.yaml      # Langfuse 6 组件
+  - 60-open-webui.yaml    # Open WebUI Deployment + Service
+  - 70-network-policies.yaml  # NetworkPolicy（显式 allow）
+  - 80-pdb.yaml           # PodDisruptionBudget
+
+# ---- 全局 label ----
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/part-of: a2a-prod
+      app.kubernetes.io/managed-by: kustomize
+      a2a-prod.io/version: "0.8.0"
+
+# ---- 通用 annotation ----
+annotations:
+  a2a-prod.io/source-repo: "D:/trae_Dproject4/a2a-prod"
+  a2a-prod.io/contact: "ops@a2a-prod.local"
+
+# ---- 镜像 tag 覆盖（按 K8s 环境替换）----
+# 用法：kustomize edit set image ...
+images:
+  - name: a2a-prod-litellm
+    newName: a2a-prod-litellm
+    newTag: "1.40.0-langfuse"
+  - name: a2a-prod-agent-glm
+    newName: a2a-prod-agent-glm
+    newTag: "0.1.0"
+  - name: a2a-prod-agent-deepseek
+    newName: a2a-prod-agent-deepseek
+    newTag: "0.1.0"
+  - name: a2a-prod-agent-minimax
+    newName: a2a-prod-agent-minimax
+    newTag: "0.1.0"
+  - name: a2a-prod-orchestrator
+    newName: a2a-prod-orchestrator
+    newTag: "0.7.0"
+  - name: a2a-prod-mcp-filesystem
+    newName: a2a-prod-mcp-filesystem
+    newTag: "0.1.0"
+  - name: a2a-prod-mcp-fetch
+    newName: a2a-prod-mcp-fetch
+    newTag: "0.1.0"
+  - name: a2a-prod-mcp-shell
+    newName: a2a-prod-mcp-shell
+    newTag: "0.1.0"
+
+# ---- generator：自动从 .env 文件生成 Secret（仅开发用，生产用 SOPS）----
+# secretGenerator:
+#   - name: a2a-prod-secrets
+#     envs:
+#       - .env.k8s  # gitignore
+
+# ---- ConfigMapGenerator（如需）----
+# configMapGenerator:
+#   - name: a2a-prod-config
+#     files:
+#       - litellm.yaml=../litellm/config.yaml

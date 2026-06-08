@@ -1,0 +1,576 @@
+# ============================================================
+# a2a-prod docker-compose（P0+P1+P2+P3+P4+P5）
+# 启动：docker compose --env-file .env.prod up -d
+# 关停：docker compose down
+# 资源：P4 起至少 4 cores + 16 GiB（Langfuse v3 完整版）
+# ============================================================
+
+name: a2a-prod
+
+# 与原 a2a-agents 网络名错开，遵守 ADR-0002 隔离原则
+networks:
+  a2a-prod-net:
+    name: a2a-prod-net
+    driver: bridge
+
+# 数据卷（P4 阶段 Langfuse 接入后会用到，P0 占位）
+volumes:
+  a2a-prod-data:
+    name: a2a-prod-data
+  # P4: Langfuse v3 自托管所需 5 个数据卷
+  langfuse_postgres_data:
+    name: a2a-prod-langfuse-postgres-data
+  langfuse_clickhouse_data:
+    name: a2a-prod-langfuse-clickhouse-data
+  langfuse_clickhouse_logs:
+    name: a2a-prod-langfuse-clickhouse-logs
+  langfuse_minio_data:
+    name: a2a-prod-langfuse-minio-data
+  langfuse_redis_data:
+    name: a2a-prod-langfuse-redis-data
+  # P5: Open WebUI 用户数据 / 会话 / 知识库持久化
+  open_webui_data:
+    name: a2a-prod-open-webui-data
+
+services:
+  # ============================================================
+  # LiteLLM Proxy — 统一三家国产模型为 OpenAI 兼容接口
+  # P4: 用自定义 Dockerfile 注入 Langfuse trace（详见 ADR-0008）
+  # ============================================================
+  litellm:
+    build:
+      context: ..
+      dockerfile: infra/litellm/Dockerfile
+    image: a2a-prod-litellm:local
+    container_name: a2a-prod-litellm
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${LITELLM_PROXY_PORT:-4000}:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    # entrypoint 在 Dockerfile 中已定义（observability.litellm_entrypoint）
+    # P4 备选：通过环境变量 LITELLM_CALLBACKS=langfuse_otel 兜底（双保险）
+    environment:
+      # 不在 compose 里硬编码 key，全部从 .env.prod 注入
+      GLM_API_KEY: ${GLM_API_KEY}
+      GLM_BASE_URL: ${GLM_BASE_URL:-https://open.bigmodel.cn/api/coding/paas/v4}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.chat/v1}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      # LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}  # 仅启用 DB 持久化时需要
+      # P4: Langfuse OTEL 回调（详情见 ADR-0008）
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      LANGFUSE_OTEL_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+    env_file:
+      - ../.env.prod
+    # LiteLLM 镜像自带 /health/liveness 端点；用 stdlib urllib 避免装 curl
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveness',timeout=3).status<400 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # GLM Agent — ADK A2A Server（P0-5 实装后真实生效）
+  # ============================================================
+  glm-agent:
+    build:
+      context: ..
+      dockerfile: agents/Dockerfile
+      args:
+        AGENT_MODULE: agents.glm_agent
+    image: a2a-prod-glm-agent:0.1.0
+    container_name: a2a-prod-glm-agent
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${GLM_AGENT_PORT:-12001}:8000"
+    environment:
+      AGENT_MODULE: agents.glm_agent
+      PORT: 8000
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      GLM_MODEL: ${GLM_MODEL:-glm-5.1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      STRUCTLOG_DEVMODE: "false"
+      HEALTHCHECK_URL: http://127.0.0.1:8000/.well-known/agent.json
+      # P4: Langfuse OTEL（防御 GitHub issue #9871 401）
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT:-http://langfuse-web:3000/api/public/otel}
+      OTEL_EXPORTER_OTLP_HEADERS: ${LANGFUSE_OTEL_HEADERS:-Authorization=Basic Og==}
+    depends_on:
+      litellm:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # DeepSeek Agent（P1）
+  # ============================================================
+  deepseek-agent:
+    build:
+      context: ..
+      dockerfile: agents/Dockerfile
+      args:
+        AGENT_MODULE: agents.deepseek_agent
+    image: a2a-prod-deepseek-agent:0.1.0
+    container_name: a2a-prod-deepseek-agent
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${DEEPSEEK_AGENT_PORT:-12002}:8000"
+    environment:
+      AGENT_MODULE: agents.deepseek_agent
+      PORT: 8000
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      STRUCTLOG_DEVMODE: "false"
+      HEALTHCHECK_URL: http://127.0.0.1:8000/.well-known/agent.json
+      # P4: Langfuse OTEL（防御 GitHub issue #9871 401）
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT:-http://langfuse-web:3000/api/public/otel}
+      OTEL_EXPORTER_OTLP_HEADERS: ${LANGFUSE_OTEL_HEADERS:-Authorization=Basic Og==}
+    depends_on:
+      litellm:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # MiniMax Agent（P1）
+  # ============================================================
+  minimax-agent:
+    build:
+      context: ..
+      dockerfile: agents/Dockerfile
+      args:
+        AGENT_MODULE: agents.minimax_agent
+    image: a2a-prod-minimax-agent:0.1.0
+    container_name: a2a-prod-minimax-agent
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${MINIMAX_AGENT_PORT:-12003}:8000"
+    environment:
+      AGENT_MODULE: agents.minimax_agent
+      PORT: 8000
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M3}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      STRUCTLOG_DEVMODE: "false"
+      HEALTHCHECK_URL: http://127.0.0.1:8000/.well-known/agent.json
+      # P4: Langfuse OTEL（防御 GitHub issue #9871 401）
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT:-http://langfuse-web:3000/api/public/otel}
+      OTEL_EXPORTER_OTLP_HEADERS: ${LANGFUSE_OTEL_HEADERS:-Authorization=Basic Og==}
+    depends_on:
+      litellm:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # Orchestrator — LangGraph + FastAPI Host（P2 引入）
+  # 复用 agents/Dockerfile（user rule 2：不重复造轮子）：
+  #   - 通过 build-arg AGENT_MODULE=orchestrator 决定运行哪个模块
+  #   - 容器内端口 12080（与 agents 的 8000 错开）
+  #   - depends_on 三 agent 全部 healthy 才启动
+  # 编排图：classify → route → {direct | decompose} → aggregate → END
+  # ============================================================
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: agents/Dockerfile
+      args:
+        AGENT_MODULE: orchestrator
+    image: a2a-prod-orchestrator:0.1.0
+    container_name: a2a-prod-orchestrator
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      # 容器内监听 12080（orchestrator 不复用 agent 的 8000）
+      - "${ORCHESTRATOR_PORT:-12080}:12080"
+    environment:
+      AGENT_MODULE: orchestrator
+      # 覆盖 agents/Dockerfile 中默认的 PORT=8000
+      PORT: 12080
+      HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      STRUCTLOG_DEVMODE: "false"
+      # healthcheck 指向 orchestrator 的 /health（而非 agent 的 /.well-known/agent.json）
+      HEALTHCHECK_URL: http://127.0.0.1:12080/health
+      # P4: Langfuse OTEL（防御 GitHub issue #9871 401）
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT:-http://langfuse-web:3000/api/public/otel}
+      OTEL_EXPORTER_OTLP_HEADERS: ${LANGFUSE_OTEL_HEADERS:-Authorization=Basic Og==}
+    # orchestrator 启动需要三 agent 已健康（A2A 客户端才能成功连接）
+    depends_on:
+      glm-agent:
+        condition: service_healthy
+      deepseek-agent:
+        condition: service_healthy
+      minimax-agent:
+        condition: service_healthy
+      langfuse-web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # MCP Filesystem Server（P3）
+  # 暴露 read_file / list_directory / write_file / create_directory
+  # 沙箱化（WORKSPACE_ROOT=/app/workspace），路径逃逸防护
+  # ============================================================
+  mcp-filesystem:
+    build:
+      context: ..
+      dockerfile: mcp_servers/Dockerfile
+      args:
+        MCP_MODULE: mcp_servers.filesystem
+    image: a2a-prod-mcp-filesystem:0.1.0
+    container_name: a2a-prod-mcp-filesystem
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${MCP_FILESYSTEM_PORT:-12101}:12101"
+    environment:
+      MCP_FILESYSTEM_PORT: 12101
+      MCP_FILESYSTEM_HOST: 0.0.0.0
+      WORKSPACE_ROOT: /app/workspace
+      HEALTHCHECK_URL: http://127.0.0.1:12101/healthz
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # workspace sandbox：bind mount 主机目录，所有 Agent 共享
+      - ../workspace:/app/workspace
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================================
+  # MCP Fetch Server（P3）
+  # 暴露 fetch(url, max_length, start_index, raw)
+  # 自研（httpx + html2text，详见 ADR-0007 退出条件 #2）
+  # ============================================================
+  mcp-fetch:
+    build:
+      context: ..
+      dockerfile: mcp_servers/Dockerfile
+      args:
+        MCP_MODULE: mcp_servers.fetch
+    image: a2a-prod-mcp-fetch:0.1.0
+    container_name: a2a-prod-mcp-fetch
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${MCP_FETCH_PORT:-12102}:12102"
+    environment:
+      MCP_FETCH_PORT: 12102
+      MCP_FETCH_HOST: 0.0.0.0
+      HEALTHCHECK_URL: http://127.0.0.1:12102/healthz
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================================
+  # MCP Shell Server（P3）
+  # 暴露 run_command(command, cwd)
+  # 命令 allowlist + 元字符黑名单 + 30s 超时（详见 SPEC §3.7.4）
+  # ============================================================
+  mcp-shell:
+    build:
+      context: ..
+      dockerfile: mcp_servers/Dockerfile
+      args:
+        MCP_MODULE: mcp_servers.shell
+    image: a2a-prod-mcp-shell:0.1.0
+    container_name: a2a-prod-mcp-shell
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${MCP_SHELL_PORT:-12103}:12103"
+    environment:
+      MCP_SHELL_PORT: 12103
+      MCP_SHELL_HOST: 0.0.0.0
+      WORKSPACE_ROOT: /app/workspace
+      HEALTHCHECK_URL: http://127.0.0.1:12103/healthz
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # shell 需要读 workspace（如 pytest samples/test_calc.py）
+      - ../workspace:/app/workspace:ro
+    healthcheck:
+      test: ["CMD", "python", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================================
+  # Langfuse v3 自托管（P4 引入，详见 ADR-0008）
+  # 6 个子服务：web / worker / postgres / clickhouse / redis / minio
+  # 资源要求：4 cores + 16 GiB 起步
+  # 容器命名：a2a-prod-langfuse-*（遵守 SPEC §3.2）
+  # 端口：3000（web dashboard，对外）/ 5432 / 8123 / 9000 / 9001 / 9090
+  # ============================================================
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3
+    container_name: a2a-prod-langfuse-web
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${LANGFUSE_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      DATABASE_URL: postgresql://postgres:${LANGFUSE_POSTGRES_PASSWORD}@postgres:5432/postgres
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH}
+      # INIT 变量：自动创建默认 org/project + PK/SK（详见 SPEC §3.8.2）
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3
+    container_name: a2a-prod-langfuse-worker
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3000}
+      DATABASE_URL: postgresql://postgres:${LANGFUSE_POSTGRES_PASSWORD}@postgres:5432/postgres
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH}
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server
+    container_name: a2a-prod-langfuse-clickhouse
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+      TZ: UTC
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  minio:
+    image: cgr.dev/chainguard/minio
+    container_name: a2a-prod-langfuse-minio
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_ROOT_PASSWORD}
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  redis:
+    image: docker.io/redis:7
+    container_name: a2a-prod-langfuse-redis
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    command: --requirepass ${LANGFUSE_REDIS_AUTH} --maxmemory-policy noeviction
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_AUTH}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  postgres:
+    image: docker.io/postgres:17
+    container_name: a2a-prod-langfuse-postgres
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+
+  # ============================================================
+  # Open WebUI — 用户前端（P5 引入，详见 ADR-0009 / SPEC §3.9）
+  # 官方镜像 ghcr.io/open-webui/open-webui:main
+  # OPENAI_API_BASE_URL 指向 orchestrator（P5 起新增 OpenAI 兼容层）
+  # OPENAI_API_KEY 与 LITELLM_MASTER_KEY 同步（共享 Bearer Token）
+  # 数据卷持久化用户 / 会话 / 知识库
+  # ============================================================
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: a2a-prod-open-webui
+    restart: unless-stopped
+    networks: [a2a-prod-net]
+    ports:
+      - "${OPEN_WEBUI_PORT:-8080}:8080"
+    volumes:
+      - open_webui_data:/app/backend/data
+    environment:
+      # P5: 关键配置 — Open WebUI 把请求发到 Orchestrator 的 OpenAI 兼容端点
+      # 容器内通过 docker 网络名访问（与 a2a-prod-net 同网络）
+      OPENAI_API_BASE_URL: http://orchestrator:12080/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+      # 默认模型名（Open WebUI 启动时显示在 model 下拉框）
+      DEFAULT_MODELS: "auto,glm-agent,deepseek-agent,minimax-agent"
+      # 关闭 telemetry（与 Langfuse 行为一致）
+      SCARF_NO_ANALYTICS: "true"
+      DO_NOT_TRACK: "true"
+      # WebUI 端口
+      PORT: 8080
+      # 时区
+      TZ: UTC
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

@@ -1,0 +1,205 @@
+# ============================================================
+# LiteLLM Proxy
+# 详见 SPEC §3.10.3
+# ============================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: litellm
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/version: "1.40.0"
+spec:
+  replicas: 2  # 至少 2 副本，保证滚动升级 + 故障转移
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: litellm
+      app.kubernetes.io/name: litellm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: litellm
+        app.kubernetes.io/name: litellm
+        app.kubernetes.io/version: "1.40.0"
+    spec:
+      serviceAccountName: litellm
+      # P4: 滚动升级时给老实例 30s 把 OTEL span flush 完
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: litellm
+          # 用与 docker-compose 相同的自定义镜像（含 langfuse SDK）
+          image: a2a-prod-litellm:1.40.0-langfuse
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          # P4: 健康检查（与 docker-compose 一致）
+          startupProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30  # 5min 内未就绪 = 启动失败
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          env:
+            - name: TZ
+              value: UTC
+            # ---- 注入敏感配置 ----
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LITELLM_MASTER_KEY
+            - name: GLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: GLM_API_KEY
+            - name: GLM_API_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: GLM_API_BASE
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: DEEPSEEK_API_KEY
+            - name: DEEPSEEK_API_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: DEEPSEEK_API_BASE
+            - name: MiniMax_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: MiniMax_API_KEY
+            - name: MiniMax_API_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: MiniMax_API_BASE
+            # P4: Langfuse OTEL 端点（SPEC §3.8.5 401 Bug 防御）
+            - name: LANGFUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: a2a-prod-shared
+                  key: LANGFUSE_HOST
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://langfuse-web:3000/api/public/otel"
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: LANGFUSE_INIT_PROJECT_SECRET_KEY
+          volumeMounts:
+            - name: litellm-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: litellm-config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: litellm
+    app.kubernetes.io/name: litellm
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: litellm
+    app.kubernetes.io/name: litellm
+---
+# HPA：LiteLLM 是无状态 + 计算密集型，适合自动扩缩
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: litellm
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/component: litellm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: litellm
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 至少观察 5min 才缩容
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100  # 一次最多扩 100%
+          periodSeconds: 30
