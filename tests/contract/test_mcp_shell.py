@@ -258,26 +258,33 @@ class TestRunCommand:
 
     async def test_timeout_translates_to_timeouterror(self, workspace: Path) -> None:
         exc = subprocess.TimeoutExpired(cmd=["sleep"], timeout=_DEFAULT_TIMEOUT_S)
-        with patch(
-            "mcp_servers.shell.server.subprocess.run",
-            side_effect=exc,
-        ), pytest.raises(TimeoutError, match="timeout"):
+        with (
+            patch(
+                "mcp_servers.shell.server.subprocess.run",
+                side_effect=exc,
+            ),
+            pytest.raises(TimeoutError, match="timeout"),
+        ):
             await run_command("ls .")
 
     async def test_metachar_rejected_before_subprocess(self, workspace: Path) -> None:
-        with patch(
-            "mcp_servers.shell.server.subprocess.run",
-            side_effect=AssertionError("should not run"),
-        ), pytest.raises(ValueError, match="shell_metachar_forbidden"):
+        with (
+            patch(
+                "mcp_servers.shell.server.subprocess.run",
+                side_effect=AssertionError("should not run"),
+            ),
+            pytest.raises(ValueError, match="shell_metachar_forbidden"),
+        ):
             await run_command("ls .; rm -rf /")
 
-    async def test_unknown_command_rejected_before_subprocess(
-        self, workspace: Path
-    ) -> None:
-        with patch(
-            "mcp_servers.shell.server.subprocess.run",
-            side_effect=AssertionError("should not run"),
-        ), pytest.raises(ValueError, match="not_in_allowlist"):
+    async def test_unknown_command_rejected_before_subprocess(self, workspace: Path) -> None:
+        with (
+            patch(
+                "mcp_servers.shell.server.subprocess.run",
+                side_effect=AssertionError("should not run"),
+            ),
+            pytest.raises(ValueError, match="not_in_allowlist"),
+        ):
             await run_command("rm -rf .")
 
     async def test_stdout_truncation(self, workspace: Path) -> None:

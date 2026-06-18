@@ -209,8 +209,7 @@ def test_glm_agent_uses_filesystem_read(glm_agent_url: str) -> None:
     - 输出含 calc.py 的某些特征（函数名 / 文件名 / 代码块标记）
     """
     payload = _build_send_payload(
-        "请用 read_file 工具读 workspace/samples/calc.py，"
-        "然后给出 3 条具体的代码改进建议。"
+        "请用 read_file 工具读 workspace/samples/calc.py，" "然后给出 3 条具体的代码改进建议。"
     )
     response = httpx.post(glm_agent_url, json=payload, timeout=180.0)
     assert response.status_code == 200
@@ -219,17 +218,25 @@ def test_glm_agent_uses_filesystem_read(glm_agent_url: str) -> None:
 
     task = body.get("result", {})
     status = task.get("status", {})
-    assert status.get("state") == "completed", (
-        f"task not completed: state={status.get('state')!r}"
-    )
+    assert status.get("state") == "completed", f"task not completed: state={status.get('state')!r}"
 
     text = _extract_final_text(body)
     # 至少 50 字（避免空响应）+ 含 calc.py 相关关键词
     assert len(text) >= 50, f"response too short: {text[:200]!r}"
-    keywords = ["calc", "add", "subtract", "multiply", "divide", "fibonacci", "代码", "建议", "审查"]
-    assert any(kw.lower() in text.lower() for kw in keywords), (
-        f"response missing calc-related keywords: {text[:300]!r}"
-    )
+    keywords = [
+        "calc",
+        "add",
+        "subtract",
+        "multiply",
+        "divide",
+        "fibonacci",
+        "代码",
+        "建议",
+        "审查",
+    ]
+    assert any(
+        kw.lower() in text.lower() for kw in keywords
+    ), f"response missing calc-related keywords: {text[:300]!r}"
 
 
 @pytest.mark.e2e
@@ -247,17 +254,15 @@ def test_deepseek_agent_uses_filesystem_list(deepseek_agent_url: str) -> None:
 
     task = body.get("result", {})
     status = task.get("status", {})
-    assert status.get("state") == "completed", (
-        f"task not completed: state={status.get('state')!r}"
-    )
+    assert status.get("state") == "completed", f"task not completed: state={status.get('state')!r}"
 
     text = _extract_final_text(body)
     assert len(text) >= 30, f"response too short: {text[:200]!r}"
     # 应该提到 workspace/samples 或目录相关词
     keywords = ["workspace", "samples", "目录", "结构", "文件", "directory"]
-    assert any(kw.lower() in text.lower() for kw in keywords), (
-        f"response missing directory-related keywords: {text[:300]!r}"
-    )
+    assert any(
+        kw.lower() in text.lower() for kw in keywords
+    ), f"response missing directory-related keywords: {text[:300]!r}"
 
 
 @pytest.mark.e2e
@@ -275,14 +280,12 @@ def test_minimax_agent_uses_shell_pytest(minimax_agent_url: str) -> None:
 
     task = body.get("result", {})
     status = task.get("status", {})
-    assert status.get("state") == "completed", (
-        f"task not completed: state={status.get('state')!r}"
-    )
+    assert status.get("state") == "completed", f"task not completed: state={status.get('state')!r}"
 
     text = _extract_final_text(body)
     assert len(text) >= 30, f"response too short: {text[:200]!r}"
     # 应该提到 pytest / 测试 / passed / failed / 通过 / 失败
     keywords = ["pytest", "passed", "failed", "测试", "通过", "失败", "test"]
-    assert any(kw.lower() in text.lower() for kw in keywords), (
-        f"response missing pytest-related keywords: {text[:300]!r}"
-    )
+    assert any(
+        kw.lower() in text.lower() for kw in keywords
+    ), f"response missing pytest-related keywords: {text[:300]!r}"

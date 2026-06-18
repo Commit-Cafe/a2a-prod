@@ -20,8 +20,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from orchestrator import a2a_client
-from orchestrator.graph import build_graph, get_compiled_graph, orchestrate
-from orchestrator.state import AgentName, OrchestrationMode
+from orchestrator.graph import build_graph, get_compiled_graph, orchestrate, route_after_classify
+from orchestrator.state import AgentName, OrchestrationMode, OrchestrationState
+
+
+@pytest.fixture(autouse=True)
+def _mock_start_trace() -> Iterator[None]:
+    with patch("orchestrator.graph.start_trace", return_value={}):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -159,6 +165,7 @@ class TestOrchestrateDecompositionMode:
     async def test_decomposition_partial_failure(self) -> None:
         """DECOMPOSITION 模式下单个 Agent 失败：其他 Agent 仍能完成。"""
         with patch.object(a2a_client, "message_send", new_callable=AsyncMock) as mock_send:
+
             async def _side_effect(url: str, text: str, **kwargs: Any) -> str:
                 if "deepseek" in url:
                     raise a2a_client.A2ATimeoutError("deepseek down")
@@ -232,3 +239,48 @@ class TestSessionIdHandling:
             s2 = await orchestrate("q2")
 
         assert s1["session_id"] != s2["session_id"]
+
+
+# ============================================================
+# Test 5：WORKFLOW 模式分支（P2.1）
+# ============================================================
+
+
+class TestWorkflowBranch:
+    """主图含 workflow_execute 节点 + classify → workflow → aggregate 路径（spec §5.4）。"""
+
+    def test_main_graph_has_workflow_node(self) -> None:
+        graph = build_graph()
+        node_ids = set(graph.nodes.keys())
+        assert "workflow_execute" in node_ids
+
+    def test_route_workflow_mode(self) -> None:
+        """mode=workflow → route_after_classify 返回 'workflow'。"""
+        state: OrchestrationState = {"mode": OrchestrationMode.WORKFLOW.value}
+        assert route_after_classify(state) == "workflow"
+
+    async def test_workflow_query_routes_to_workflow_execute(self) -> None:
+        """长研发需求 query → classify 路由 workflow → 调用 SDLC 子图。
+
+        用 mock 模拟整个 SDLC 链路（DeepSeek/GLM/MiniMax 各一次，无反馈），
+        验证主图能正确进入 workflow_execute 并产出来自子图的 final_answer。
+        """
+
+        # mock a2a_client 按 url 分流
+        async def _side_effect(url: str, text: str, **kwargs: Any) -> str:
+            if "deepseek" in url:
+                return "# Spec 文档"
+            if "minimax" in url:
+                return "已实现 lru.py，pytest 全过\n[FILES_WRITTEN] code/lru.py"
+            return "# 技术规范"  # glm
+
+        with patch.object(a2a_client, "message_send", side_effect=_side_effect):
+            state = await orchestrate(
+                "实现一个线程安全的 LRU 缓存并附完整的 pytest 单元测试",
+                session_id="wf-test",
+            )
+
+        assert state["mode"] == OrchestrationMode.WORKFLOW.value
+        # final_answer 含 SDLC 各阶段产出（aggregate 拼接）
+        assert "📋" in state["final_answer"] or "Spec" in state["final_answer"]
+        assert "🏗️" in state["final_answer"] or "技术规范" in state["final_answer"]

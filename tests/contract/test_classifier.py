@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from orchestrator.classifier import (
@@ -238,3 +240,121 @@ class TestRouteAfterClassify:
         assert route_after_classify(state_unknown) == "direct"
         state_empty: OrchestrationState = {"mode": ""}
         assert route_after_classify(state_empty) == "direct"
+
+
+# ============================================================
+# Test 6：WORKFLOW 触发判定（P2.1）
+# ============================================================
+
+
+class TestWorkflowDetection:
+    """``_is_workflow`` 关键词 + 正则 + 长度约束（spec §5.1）。"""
+
+    def test_long_implement_query_triggers(self) -> None:
+        """'实现一个 X'（≥15 字）→ 触发 WORKFLOW。"""
+        from orchestrator.classifier import _is_workflow
+
+        assert _is_workflow("实现一个线程安全的 LRU 缓存并附测试") is True
+
+    def test_short_implement_query_no_trigger(self) -> None:
+        """'实现一个 X'（<15 字）→ 不触发。"""
+        from orchestrator.classifier import _is_workflow
+
+        assert _is_workflow("实现一个 hello") is False
+
+    def test_explicit_workflow_keyword(self) -> None:
+        from orchestrator.classifier import _is_workflow
+
+        assert _is_workflow("帮我走工作流完成这个功能") is True
+        assert _is_workflow("端到端研发流程") is True
+
+    def test_complete_keyword_triggers(self) -> None:
+        """正则 '完整 + 研发动词' 触发（不依赖长度）。"""
+        from orchestrator.classifier import _is_workflow
+
+        assert _is_workflow("请完整实现这个模块") is True
+
+    def test_general_question_not_triggered(self) -> None:
+        from orchestrator.classifier import _is_workflow
+
+        assert _is_workflow("你好，介绍量子计算") is False
+        assert _is_workflow("今天天气怎么样") is False
+
+
+class TestClassifyWorkflowMode:
+    """``classify`` 节点的 WORKFLOW 分支（spec §5.2）。"""
+
+    def test_workflow_mode_returned(self) -> None:
+        """长研发需求 query → classify 返回 mode=workflow + 初始 state 字段。"""
+        result = classify(_state("实现一个支持 TTL 过期的 LRU 缓存并附 pytest 测试"))
+        assert result["mode"] == OrchestrationMode.WORKFLOW.value
+        assert result["target_agent"] == ""
+        assert result["subtasks"] == []
+        assert result["workflow_status"] == "running"
+        assert result["feedback_rounds"] == 0
+
+    def test_decomposition_priority_over_workflow(self) -> None:
+        """对比类问题（含'实现'）→ DECOMPOSITION 优先（不走 WORKFLOW）。"""
+        result = classify(_state("对比 Python 和 Go 实现一个 web 服务的区别"))
+        assert result["mode"] == OrchestrationMode.TASK_DECOMPOSITION.value
+
+    def test_short_code_query_still_direct(self) -> None:
+        """短代码 query（'帮我写 hello'）→ 仍走 DIRECT → MiniMax。"""
+        result = classify(_state("帮我写一个 hello 函数"))
+        assert result["mode"] == OrchestrationMode.DIRECT.value
+        assert result["target_agent"] == AgentName.MINIMAX.value
+
+    # ---- B3 修复（GLM 2026-06-18 review）：state 已带 target_agent 时短路 ----
+
+    def test_forced_target_agent_short_circuits(self) -> None:
+        """B3：当 state['target_agent'] 已由 orchestrate() 注入（强制路由）→ classify 短路。
+
+        场景：用户用 Open WebUI 选 glm-agent 发"重构这段代码"，按关键词会路由到
+        minimax-agent（命中"重构/代码"）；但 state 已含 target_agent='glm-agent'，
+        classify 必须短路。
+        """
+        state = cast(
+            OrchestrationState,
+            {
+                "user_query": "重构这段代码",
+                "session_id": "test",
+                "user_id": "u",
+                "target_agent": "glm-agent",  # 已由 orchestrate() 注入
+                "mode": "direct",
+            },
+        )
+        result = classify(state)
+        assert result["mode"] == OrchestrationMode.DIRECT.value
+        assert result["target_agent"] == "glm-agent"  # 不被关键词改写
+        # 显式标注 forced
+        # 验证日志中 reason 包含 "forced_by_caller"（通过结构化 logger 不可见，间接验：路由不变）
+
+    def test_forced_target_agent_overrides_keywords(self) -> None:
+        """B3：强制 target_agent=minimax-agent 时，发 GLM 关键词 query 也不改路由。"""
+        state = cast(
+            OrchestrationState,
+            {
+                "user_query": "请审查这段代码",
+                "session_id": "test",
+                "user_id": "u",
+                "target_agent": "minimax-agent",
+            },
+        )
+        result = classify(state)
+        # 即使 '审查' 命中 GLM 关键词，被强制参数压住
+        assert result["target_agent"] == "minimax-agent"
+
+    def test_forced_target_agent_overrides_decomposition(self) -> None:
+        """B3：强制 target_agent 也要压住 DECOMPOSITION 模式。"""
+        state = cast(
+            OrchestrationState,
+            {
+                "user_query": "对比 Python 和 Go 的 web 框架",  # DECOMPOSITION 触发
+                "session_id": "test",
+                "user_id": "u",
+                "target_agent": "deepseek-agent",
+            },
+        )
+        result = classify(state)
+        assert result["mode"] == OrchestrationMode.DIRECT.value
+        assert result["target_agent"] == "deepseek-agent"

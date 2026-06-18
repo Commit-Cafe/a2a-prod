@@ -1,65 +1,21 @@
-# 与 .gitignore 大体重叠，但显式列出 Docker 构建上下文要排除的目录
-# 避免把 .venv-prod / build / .git 拷进镜像
-
-.venv-prod/
-.venv/
-venv/
-env/
-
-# 构建产物
-build/
-dist/
-*.egg-info/
-__pycache__/
-*.py[cod]
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
-htmlcov/
-.coverage
-.coverage.*
-
-# IDE / OS
-.vscode/
-.idea/
-.DS_Store
-*.swp
-
-# 环境变量（绝不进镜像）
-.env
-.env.prod
-.env.local
-.env.*.local
-
-# 日志与本地数据
-*.log
-logs/
-*.pid
-*.db
-*.db-shm
-*.db-wal
-data/
-langfuse-data/
-open-webui-data/
-
-# workspace sandbox（运行时 bind mount，不进镜像）
-workspace/
-
-# Git
-.git/
+.git
 .gitignore
-.gitattributes
-
-# uv lock / pip lock（P0 阶段不锁，依赖 pyproject.toml 即可）
-uv.lock
-
-# 文档不进镜像（减少体积）
-docs/
+.venv
+.venv-prod
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+.graphify
+graphify-out
 *.md
 !README.md
-
-# 本 dockerignore 自身
-.dockerignore
-
-# uv install 日志（开发时 tee 写出）
-uv_install.log
+.env
+.env.*
+*.log
+.idea
+.vscode
+.DS_Store
+Thumbs.db

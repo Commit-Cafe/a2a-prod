@@ -2,7 +2,7 @@
 
 差异点 ONLY：
 - ``name`` = "deepseek-agent"
-- ``model_name`` = "deepseek-v4-pro"（与 LiteLLM config.yaml 对齐）
+- ``model_name`` = "deepseek-chat"（与 LiteLLM config.yaml 对齐）
 - ``description``：产品经理 + 技术总监
 - ``skills``：1 个 skill 描述需求分析与技术方案设计
 - ``default_instruction``：偏需求拆解 + 方案设计视角的系统提示
@@ -31,7 +31,7 @@ class DeepSeekAgentSettings(BaseAgentSettings):
     继承 BaseAgentSettings，并加 DeepSeek 专属字段（未来如 reasoning_effort 等）。
     """
 
-    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_model: str = "deepseek-chat"
     """从 .env.prod 读取的 DEEPSEEK_MODEL，仅做记录；实际 model_name 用类属性。"""
 
 
@@ -57,7 +57,7 @@ class DeepSeekAgent(BaseAgent):
     @property
     def model_name(self) -> str:
         # 与 infra/litellm/config.yaml 的 model_list[1].model_name 一致
-        return "deepseek-v4-pro"
+        return "deepseek-chat"
 
     @property
     def description(self) -> str:
@@ -138,7 +138,3 @@ class DeepSeekAgent(BaseAgent):
             "- 用中文回复，技术术语保留英文"
             + tools_hint
         )
-
-
-# 方便 ``from agents.deepseek_agent.agent import agent`` 直接拿到实例（ADK 风格）
-agent = DeepSeekAgent()

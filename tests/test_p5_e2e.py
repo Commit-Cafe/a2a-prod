@@ -75,9 +75,9 @@ def _bearer() -> dict[str, str]:
 def test_open_webui_health(open_webui_url: str) -> None:
     """SPEC §3.9.1：Open WebUI 暴露 ``/health`` 端点。"""
     response = httpx.get(f"{open_webui_url}/health", timeout=10.0)
-    assert response.status_code == 200, (
-        f"open-webui not healthy: {response.status_code} {response.text[:200]}"
-    )
+    assert (
+        response.status_code == 200
+    ), f"open-webui not healthy: {response.status_code} {response.text[:200]}"
 
 
 @pytest.mark.e2e
@@ -276,9 +276,7 @@ def test_open_webui_can_proxy_to_orchestrator(open_webui_url: str) -> None:
     """
     response = httpx.get(f"{open_webui_url}/api/config", timeout=10.0)
     # /api/config 不需要鉴权，返回前端运行时配置
-    assert response.status_code == 200, (
-        f"open-webui /api/config failed: {response.status_code}"
-    )
+    assert response.status_code == 200, f"open-webui /api/config failed: {response.status_code}"
 
 
 # ============================================================
@@ -316,9 +314,9 @@ def test_end_to_end_chat_via_openai_compat(orchestrator_url: str) -> None:
     )
     elapsed = time.time() - started
 
-    assert response.status_code == 200, (
-        f"chat completion failed: {response.status_code} {response.text[:500]}"
-    )
+    assert (
+        response.status_code == 200
+    ), f"chat completion failed: {response.status_code} {response.text[:500]}"
     body = response.json()
 
     # 必含字段

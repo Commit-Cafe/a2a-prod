@@ -125,9 +125,9 @@ def test_message_send(request: pytest.FixtureRequest, agent_url_fixture: str) ->
     status = task.get("status")
     assert isinstance(status, dict)
     state = status.get("state")
-    assert state == "completed", (
-        f"task not completed: state={state!r}, message={status.get('message')!r}"
-    )
+    assert (
+        state == "completed"
+    ), f"task not completed: state={state!r}, message={status.get('message')!r}"
 
 
 # ============================================================
@@ -170,12 +170,8 @@ def test_message_stream(request: pytest.FixtureRequest, agent_url_fixture: str) 
     # httpx 流式：with stream 切到上下文
     data_lines: list[str] = []
     final_state: str | None = None
-    with httpx.stream(
-        "POST", base_url, json=payload, timeout=180.0
-    ) as response:
-        assert response.status_code == 200, (
-            f"HTTP {response.status_code}"
-        )
+    with httpx.stream("POST", base_url, json=payload, timeout=180.0) as response:
+        assert response.status_code == 200, f"HTTP {response.status_code}"
         ct = response.headers.get("content-type", "")
         assert "text/event-stream" in ct, f"unexpected content-type: {ct!r}"
 
@@ -183,7 +179,7 @@ def test_message_stream(request: pytest.FixtureRequest, agent_url_fixture: str) 
             if not line:
                 continue
             if line.startswith("data:"):
-                data_lines.append(line[len("data:"):].strip())
+                data_lines.append(line[len("data:") :].strip())
 
     # 至少收到一个 data 行
     assert data_lines, "no SSE data event received"
@@ -209,6 +205,6 @@ def test_message_stream(request: pytest.FixtureRequest, agent_url_fixture: str) 
                 final_state = status.get("state")
 
     # 容忍 working 中间态，但最后必须有 completed
-    assert final_state == "completed", (
-        f"final state not completed: {final_state!r}, last_event={last_event!r}"
-    )
+    assert (
+        final_state == "completed"
+    ), f"final state not completed: {final_state!r}, last_event={last_event!r}"

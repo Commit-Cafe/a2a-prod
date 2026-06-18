@@ -9,24 +9,26 @@ model_list:
   # GLM（智谱）— 走 OpenAI 兼容协议
   # 注意：litellm 用 model 名做路由，openai/ 前缀表示走 OpenAI 兼容协议
   # ------------------------------------------------------------
-  - model_name: glm-5.1
+  - model_name: glm-5
     litellm_params:
-      model: openai/glm-5.1
+      model: openai/glm-5
       api_base: os.environ/GLM_BASE_URL
       api_key: os.environ/GLM_API_KEY
-      timeout: 60
+      timeout: 300
       retry: 3
+      # glm-5 是 reasoning 模型，思考链占大量 tokens；默认给足避免 content 被截空
+      max_tokens: 8192
 
   # ------------------------------------------------------------
   # DeepSeek
-  # 模型名 deepseek-v4-pro：用户指定（2026-06-08）
+  # 模型名 deepseek-chat：用户指定（2026-06-17，快速模型优先）
   # ------------------------------------------------------------
-  - model_name: deepseek-v4-pro
+  - model_name: deepseek-chat
     litellm_params:
-      model: openai/deepseek-v4-pro
+      model: openai/deepseek-chat
       api_base: os.environ/DEEPSEEK_BASE_URL
       api_key: os.environ/DEEPSEEK_API_KEY
-      timeout: 60
+      timeout: 300
       retry: 3
 
   # ------------------------------------------------------------
@@ -38,8 +40,10 @@ model_list:
       model: openai/MiniMax-M3
       api_base: os.environ/MINIMAX_BASE_URL
       api_key: os.environ/MINIMAX_API_KEY
-      timeout: 60
+      timeout: 300
       retry: 3
+      # M3 是 reasoning 模型（<think>），给足 max_tokens 避免输出被截
+      max_tokens: 8192
 
 # ============================================================
 # 通用设置

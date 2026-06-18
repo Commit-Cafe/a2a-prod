@@ -137,7 +137,3 @@ class MiniMaxAgent(BaseAgent):
             "- 用中文回复说明，代码用英文"
             + tools_hint
         )
-
-
-# 方便 ``from agents.minimax_agent.agent import agent`` 直接拿到实例（ADK 风格）
-agent = MiniMaxAgent()

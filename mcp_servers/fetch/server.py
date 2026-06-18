@@ -28,6 +28,8 @@ _mcp: FastMCP = FastMCP(
     name="fetch-mcp",
     stateless_http=True,
     json_response=True,
+    host=os.environ.get("MCP_FETCH_HOST", "0.0.0.0"),
+    port=int(os.environ.get("MCP_FETCH_PORT", "12102")),
 )
 
 
@@ -100,10 +102,11 @@ async def fetch(
 
 
 def main() -> None:
-    """启动 fetch MCP server（Streamable HTTP）。"""
-    port = int(os.environ.get("MCP_FETCH_PORT", "12102"))
-    host = os.environ.get("MCP_FETCH_HOST", "0.0.0.0")
-    _mcp.run(transport="streamable-http", host=host, port=port)  # type: ignore[call-arg]
+    """启动 fetch MCP server（Streamable HTTP）。
+
+    host/port 在 FastMCP 构造时传入（mcp SDK 1.28+ 不再支持 run() 的 host/port 参数）。
+    """
+    _mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":

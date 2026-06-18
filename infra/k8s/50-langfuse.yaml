@@ -37,6 +37,15 @@ spec:
         - name: postgres
           image: postgres:17
           imagePullPolicy: IfNotPresent
+          # 安全基线：postgres 官方镜像默认以 postgres(999) 用户跑，
+          # 显式声明 runAsNonRoot + allowPrivilegeEscalation=false 满足 Pod Security Standards
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: pg
               containerPort: 5432
@@ -130,6 +139,14 @@ spec:
         - name: clickhouse
           image: clickhouse/clickhouse-server:24.3
           imagePullPolicy: IfNotPresent
+          # 安全基线：clickhouse 官方镜像默认以 clickhouse(101) 用户跑
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8123
@@ -231,6 +248,14 @@ spec:
         - name: redis
           image: redis:7-alpine
           imagePullPolicy: IfNotPresent
+          # 安全基线：redis 官方镜像默认以 redis(999) 用户跑
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: redis
               containerPort: 6379
@@ -241,19 +266,26 @@ spec:
                 secretKeyRef:
                   name: a2a-prod-secrets
                   key: REDIS_PASSWORD
+            # N7 修复（GLM 2026-06-18 review）：redis-cli 用 REDISCLI_AUTH env 注入密码，
+            # 避免 `redis-cli -a $(REDIS_PASSWORD)` 把密码出现在 ps / probe 日志里。
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: a2a-prod-secrets
+                  key: REDIS_PASSWORD
           livenessProbe:
             exec:
-              command: ["redis-cli", "-a", "$(REDIS_PASSWORD)", "ping"]
+              command: ["redis-cli", "ping"]
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
             exec:
-              command: ["redis-cli", "-a", "$(REDIS_PASSWORD)", "ping"]
+              command: ["redis-cli", "ping"]
             initialDelaySeconds: 5
             periodSeconds: 5
           startupProbe:
             exec:
-              command: ["redis-cli", "-a", "$(REDIS_PASSWORD)", "ping"]
+              command: ["redis-cli", "ping"]
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 20
@@ -308,8 +340,16 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: minio
-          image: minio/minio:latest
+          image: minio/minio:RELEASE.2024-10-13T13-34-11Z
           imagePullPolicy: IfNotPresent
+          # 安全基线：minio 官方镜像默认以 minio(1000) 用户跑
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           args:
             - server
             - /data

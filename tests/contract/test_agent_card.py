@@ -26,8 +26,8 @@ AgentFactory = Callable[[], BaseAgent]
 
 
 AGENTS: tuple[tuple[str, AgentFactory, str, str], ...] = (
-    ("glm", GLMAgent, "glm-agent", "glm-5.1"),
-    ("deepseek", DeepSeekAgent, "deepseek-agent", "deepseek-v4-pro"),
+    ("glm", GLMAgent, "glm-agent", "glm-5"),
+    ("deepseek", DeepSeekAgent, "deepseek-agent", "deepseek-chat"),
     ("minimax", MiniMaxAgent, "minimax-agent", "MiniMax-M3"),
 )
 
@@ -160,11 +160,15 @@ class TestAgentCardProtocol:
 class TestAgentSpecifics:
     """SPEC §2.2 差异约束（参数化覆盖三 Agent）。"""
 
-    def test_name_matches(self, factory: AgentFactory, expected_name: str, expected_model: str) -> None:
+    def test_name_matches(
+        self, factory: AgentFactory, expected_name: str, expected_model: str
+    ) -> None:
         agent = factory()
         assert agent.name == expected_name
 
-    def test_model_name_matches(self, factory: AgentFactory, expected_name: str, expected_model: str) -> None:
+    def test_model_name_matches(
+        self, factory: AgentFactory, expected_name: str, expected_model: str
+    ) -> None:
         agent = factory()
         assert agent.model_name == expected_model
 
@@ -178,7 +182,9 @@ class TestAgentSpecifics:
         agent = factory()
         assert agent._build_litellm_model() == f"openai/{expected_model}"
 
-    def test_skills_non_empty(self, factory: AgentFactory, expected_name: str, expected_model: str) -> None:
+    def test_skills_non_empty(
+        self, factory: AgentFactory, expected_name: str, expected_model: str
+    ) -> None:
         agent = factory()
         assert len(agent.skills) >= 1
 
@@ -204,13 +210,13 @@ class TestGLMAgentSpecifics:
     def test_name_is_glm_agent(self) -> None:
         assert GLMAgent().name == "glm-agent"
 
-    def test_model_name_is_glm_51(self) -> None:
-        assert GLMAgent().model_name == "glm-5.1"
+    def test_model_name_is_glm_5(self) -> None:
+        assert GLMAgent().model_name == "glm-5"
 
     def test_litellm_model_string_uses_openai_prefix(self) -> None:
         """SPEC §2.3：MUST 走 openai/<model> 路由。"""
         agent = GLMAgent()
-        assert agent._build_litellm_model() == "openai/glm-5.1"
+        assert agent._build_litellm_model() == "openai/glm-5"
 
 
 # ============================================================
@@ -224,8 +230,8 @@ class TestDeepSeekAgentSpecifics:
     def test_name_is_deepseek_agent(self) -> None:
         assert DeepSeekAgent().name == "deepseek-agent"
 
-    def test_model_name_is_deepseek_v4_pro(self) -> None:
-        assert DeepSeekAgent().model_name == "deepseek-v4-pro"
+    def test_model_name_is_deepseek_chat(self) -> None:
+        assert DeepSeekAgent().model_name == "deepseek-chat"
 
     def test_skill_is_requirement_analysis(self) -> None:
         """SPEC §2.2：DeepSeek = 产品经理 + 技术总监。"""
@@ -235,7 +241,7 @@ class TestDeepSeekAgentSpecifics:
 
     def test_litellm_model_string_uses_openai_prefix(self) -> None:
         agent = DeepSeekAgent()
-        assert agent._build_litellm_model() == "openai/deepseek-v4-pro"
+        assert agent._build_litellm_model() == "openai/deepseek-chat"
 
 
 # ============================================================

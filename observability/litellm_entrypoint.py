@@ -56,11 +56,27 @@ def main() -> int:
     from litellm.proxy.proxy_cli import run_server
 
     logger.info("启动 LiteLLM Proxy：config=%s port=%d", args.config, args.port)
-    result = run_server(
-        config=args.config,
-        port=args.port,
-        host=args.host,
-    )
+    # S10 修复（GLM 2026-06-18 review）：包 try/except 兜底——run_server 在不同
+    # litellm 版本里可能返回 None / 抛异常 / 调 sys.exit。失败时打 error 上下文再 raise，
+    # 便于排障（之前裸调用只打 traceback，没有"LiteLLM 启动失败"标识）。
+    try:
+        result = run_server(
+            config=args.config,
+            port=args.port,
+            host=args.host,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "litellm_start_failed: %s",
+            e,
+            extra={
+                "config": args.config,
+                "port": args.port,
+                "host": args.host,
+                "error_type": type(e).__name__,
+            },
+        )
+        raise
     return int(result) if isinstance(result, int) else 0
 
 

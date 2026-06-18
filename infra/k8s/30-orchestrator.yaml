@@ -81,11 +81,15 @@ spec:
                   key: ORCHESTRATOR_API_KEY
                   optional: true
             # ---- 3 Agent URL ----
-            - name: GLM_AGENT_URL
+            # R1 修复（GLM 2026-06-18 review2）：env 名对齐 orchestrator/executor.py 的
+            # os.getenv key（AGENT_URLS_GLM_AGENT / _DEEPSEEK_AGENT / _MINIMAX_AGENT）。
+            # 旧名 GLM_AGENT_URL / DEEPSEEK_AGENT_URL / MiniMax_AGENT_URL 与代码对不上，
+            # 全部走默认 :8000 → K8s 下 agent 监听 12001/12002/12003 → connection refused。
+            - name: AGENT_URLS_GLM_AGENT
               value: "http://glm-agent:12001/"
-            - name: DEEPSEEK_AGENT_URL
+            - name: AGENT_URLS_DEEPSEEK_AGENT
               value: "http://deepseek-agent:12002/"
-            - name: MiniMax_AGENT_URL
+            - name: AGENT_URLS_MINIMAX_AGENT
               value: "http://minimax-agent:12003/"
             # P4: Langfuse OTEL
             - name: LANGFUSE_HOST
@@ -161,8 +165,10 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
----
+
+# ============================================================
 # Ingress 模板（注释形式给出；按需取消注释并填入真实 hostname）
+# ------------------------------------------------------------
 # apiVersion: networking.k8s.io/v1
 # kind: Ingress
 # metadata:
@@ -184,3 +190,4 @@ spec:
 #                 name: orchestrator
 #                 port:
 #                   number: 12080
+# ============================================================

@@ -69,20 +69,26 @@ spec:
     requests:
       storage: 5Gi
   storageClassName: standard
+
+# ============================================================
+# workspace 共享卷（mcp-filesystem 写 / mcp-shell 读）
+# B2 修复（GLM 2026-06-18 review）：MCP server 启动时 WORKSPACE_ROOT=/workspace
+# 但 readOnlyRootFilesystem=true 且无 PVC 挂载 → write_file / run_command 全部 OSError。
+# 注：mcp-filesystem / mcp-shell 都配 replicas=1（RWO 即可，无需 RWX）。
+# ============================================================
 ---
-# 可选：workspace 共享卷（多 Agent 共享沙盒）
-# 启用方法：去掉下面注释；同时在 Agent Deployment 里 mount 这个 PVC
-# apiVersion: v1
-# kind: PersistentVolumeClaim
-# metadata:
-#   name: a2a-prod-workspace
-#   namespace: a2a-prod
-#   labels:
-#     app.kubernetes.io/part-of: a2a-prod
-# spec:
-#   accessModes:
-#     - ReadWriteMany  # 多 Pod 同时挂载
-#   resources:
-#     requests:
-#       storage: 10Gi
-#   storageClassName: standard  # 需要 RWX 支持
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: a2a-prod-workspace
+  namespace: a2a-prod
+  labels:
+    app.kubernetes.io/part-of: a2a-prod
+    a2a-prod.io/storage: workspace
+spec:
+  accessModes:
+    - ReadWriteOnce  # mcp-filesystem 单独写 / mcp-shell 单独读（K8s 单 Pod RWO 即可）
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard

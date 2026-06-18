@@ -15,7 +15,14 @@ from typing import Any
 import structlog
 
 from observability.tracing import trace_node
-from orchestrator.state import AgentName, OrchestrationState
+from orchestrator.sdlc_workflow import NEED_HELP_MARKER, get_max_feedback_rounds
+from orchestrator.state import (
+    AgentName,
+    OrchestrationMode,
+    OrchestrationState,
+    SdlcDoc,
+    SdlcFeedback,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -36,7 +43,17 @@ _AGENT_DISPLAY: dict[str, str] = {
 
 
 def aggregate(state: OrchestrationState) -> dict[str, Any]:
-    """LangGraph 节点：合并 agent_responses 为 final_answer。"""
+    """LangGraph 节点：合并 agent_responses 为 final_answer。
+
+    P2.1 新增：mode=workflow 时走专属聚合 ``_aggregate_workflow``（spec §5.6），
+    其余走原有 DIRECT/DECOMPOSITION 逻辑。
+    """
+    mode = state.get("mode", "")
+
+    # P2.1：WORKFLOW 模式专属聚合
+    if mode == OrchestrationMode.WORKFLOW.value:
+        return _aggregate_workflow(state)
+
     responses: dict[str, str] = state.get("agent_responses", {}) or {}
     errors: list[str] = state.get("errors", []) or []
     session_id = state.get("session_id", "-")
@@ -76,3 +93,81 @@ def aggregate(state: OrchestrationState) -> dict[str, Any]:
 
 
 aggregate = trace_node(name="orchestrator.aggregate")(aggregate)
+
+
+# ============================================================
+# P2.1：WORKFLOW 模式专属聚合（spec §5.6）
+# ============================================================
+
+
+def _aggregate_workflow(state: OrchestrationState) -> dict[str, Any]:
+    """WORKFLOW 模式专属聚合：按研发流程顺序拼接各阶段产出。
+
+    拼接顺序：Spec（DeepSeek）→ 技术规范（GLM）→ 反馈回路记录 →
+    实现（MiniMax）→ 落盘文件 → 错误附录 → 工作流状态总结。
+
+    Returns:
+        ``{"final_answer": ..., "workflow_status": ...}``
+    """
+    doc: SdlcDoc = state.get("sdlc_doc", {}) or {}
+    feedbacks: list[SdlcFeedback] = state.get("sdlc_feedback", []) or []
+    errors: list[str] = state.get("errors", []) or []
+    rounds = state.get("feedback_rounds", 0)
+    # S7 修复：函数级 getter（参见 sdlc_workflow.get_max_feedback_rounds）
+    max_rounds = get_max_feedback_rounds()
+
+    sections: list[str] = []
+
+    # 1. Spec（DeepSeek）
+    if doc.get("spec"):
+        sections.append(f"## 📋 Spec（DeepSeek 产 PRD）\n\n{doc['spec']}")
+
+    # 2. 技术规范（GLM-5.2）
+    if doc.get("tech_design"):
+        sections.append(f"## 🏗️ 技术规范（GLM-5.2）\n\n{doc['tech_design']}")
+
+    # 3. 反馈回路记录
+    for fb in feedbacks:
+        sections.append(
+            f"## 🔁 反馈轮次 {fb['round']}（GLM-5.2 → MiniMax）\n\n"
+            f"**MiniMax 阻塞**：{fb['blocker']}\n\n"
+            f"**GLM 指导**：{fb['guidance']}"
+        )
+
+    # 4. 实现（MiniMax）
+    if doc.get("implementation"):
+        impl = doc["implementation"]
+        # N2 修复（GLM 2026-06-18 review）：用 rounds 判断状态而非重扫文本
+        # （避免 MiniMax 在解释中引用 [NEED_HELP] 字符串导致误判 ⚠️）
+        status_emoji = "⚠️" if rounds >= max_rounds else "✅"
+        sections.append(f"## {status_emoji} 实现（MiniMax）\n\n{impl}")
+
+    # 5. 产出文件清单
+    code_paths = doc.get("code_paths") or []
+    if code_paths:
+        paths_md = "\n".join(f"- `{p}`" for p in code_paths)
+        sections.append(f"## 📁 落盘文件\n\n{paths_md}")
+
+    # 6. 错误附录
+    if errors:
+        sections.append("## ⚠️ 执行错误\n\n" + "\n".join(f"- {e}" for e in errors))
+
+    # 7. 状态总结 + workflow_status 推导
+    impl_text = doc.get("implementation", "")
+    unresolved = NEED_HELP_MARKER in impl_text and rounds >= max_rounds
+    if unresolved:
+        status_summary = (
+            f"⚠️ MiniMax 仍有阻塞但已达反馈上限" f"（{rounds}/{max_rounds}），需人工介入"
+        )
+        workflow_status = "blocked_unresolved"
+    elif rounds > 0:
+        status_summary = f"✅ 经 {rounds} 轮反馈后完成"
+        workflow_status = "blocked_resolved"
+    else:
+        status_summary = "✅ 一次通过，无反馈"
+        workflow_status = "blocked_resolved"
+
+    sections.append(f"## 📊 工作流状态\n\n{status_summary}")
+
+    final = "\n\n---\n\n".join(sections)
+    return {"final_answer": final, "workflow_status": workflow_status}

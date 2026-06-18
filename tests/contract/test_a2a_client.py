@@ -237,6 +237,55 @@ class TestMessageSendSuccess:
         assert len(set(ids)) == 2
         assert all(mid.startswith("orch-") for mid in ids)
 
+    # ---- S5 修复（GLM 2026-06-18 review）：默认 request_id 改 uuid ----
+
+    async def test_default_request_id_is_unique(self) -> None:
+        """S5：默认 request_id（None）时每次调用都生成不同 id。
+
+        DECOMPOSITION 模式会 asyncio.gather 并行调三个 Agent；如果三个请求的
+        JSON-RPC id 撞车，潜在中间件按 id 复用响应时会出问题。
+        """
+        body = _jsonrpc_success(_task_with_artifacts(["ok"]))
+        mock_resp = _make_response(200, body)
+
+        request_ids: list[int] = []
+        with patch.object(a2a_client, "_get_client") as mock_get:
+            mock_client = MagicMock(spec=httpx.AsyncClient)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_get.return_value = mock_client
+
+            # 并行模拟 DECOMPOSITION 的 gather
+            import asyncio
+            await asyncio.gather(
+                message_send("http://test:8000", "q1"),
+                message_send("http://test:8000", "q2"),
+                message_send("http://test:8000", "q3"),
+            )
+            for call in mock_client.post.call_args_list:
+                request_ids.append(call.kwargs["json"]["id"])
+
+        assert len(set(request_ids)) == 3, f"request_ids must be unique, got {request_ids}"
+        # 全部应在 JSON-RPC 安全 int 范围（≤ 2^53）
+        for rid in request_ids:
+            assert 0 < rid < 2**53
+
+    async def test_explicit_request_id_honored(self) -> None:
+        """S5：e2e 测试显式传 request_id 时必须按传值走。"""
+        body = _jsonrpc_success(_task_with_artifacts(["ok"]))
+        mock_resp = _make_response(200, body)
+
+        with patch.object(a2a_client, "_get_client") as mock_get:
+            mock_client = MagicMock(spec=httpx.AsyncClient)
+            mock_client.post = AsyncMock(return_value=mock_resp)
+            mock_get.return_value = mock_client
+
+            await message_send("http://test:8000", "q", request_id=42)
+            await message_send("http://test:8000", "q", request_id=42)  # e2e 可复用
+
+        # 两次都传 42 → payload["id"] = 42
+        assert mock_client.post.call_args_list[0].kwargs["json"]["id"] == 42
+        assert mock_client.post.call_args_list[1].kwargs["json"]["id"] == 42
+
 
 # ============================================================
 # Test 3：message_send 异常分层

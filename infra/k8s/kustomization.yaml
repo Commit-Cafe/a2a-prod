@@ -29,7 +29,11 @@ resources:
   - 01-rbac.yaml          # ServiceAccount
   - 02-configmap.yaml     # ConfigMap（litellm config / langfuse web env / shared）
   - 03-pvc.yaml           # PersistentVolumeClaim
-  - secrets.yaml          # ⚠ Secret 单独维护（gitignore）；不在 resources 列表中
+  # M1 修复（GLM 2026-06-18 review2）：下方 secrets.yaml 实际**在** resources 列表中
+  # （gitignore，只有 secrets.yaml.example 提交）；apply -k 前必须先
+  # `cp secrets.yaml.example secrets.yaml` 并替换所有 REPLACE_ME/CHANGE-ME。
+  # 注：之前的旧注释写"不在 resources 列表中"与事实矛盾，已修正。
+  - secrets.yaml          # ⚠ apply -k 前必须先 cp secrets.yaml.example secrets.yaml
   - 10-litellm.yaml       # LiteLLM Deployment + Service + HPA
   - 20-agents.yaml        # 3 Agent Deployment + Service + HPA
   - 30-orchestrator.yaml  # Orchestrator Deployment + Service + HPA
@@ -48,8 +52,10 @@ labels:
       a2a-prod.io/version: "0.8.0"
 
 # ---- 通用 annotation ----
+# N6 修复（GLM 2026-06-18 review）：旧版 source-repo 写死 Windows 本地路径，部署到集群后
+# 会泄露开发机路径；改用 generic 占位，由 CI/CD 在构建时覆盖。
 annotations:
-  a2a-prod.io/source-repo: "D:/trae_Dproject4/a2a-prod"
+  a2a-prod.io/source-repo: "https://git.example.com/a2a-prod.git"
   a2a-prod.io/contact: "ops@a2a-prod.local"
 
 # ---- 镜像 tag 覆盖（按 K8s 环境替换）----

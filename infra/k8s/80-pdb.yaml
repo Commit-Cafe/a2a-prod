@@ -90,6 +90,8 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: langfuse-web
----
+
+# ============================================================
 # 注意：Langfuse 6 子组件中 postgres / clickhouse / redis / minio 都是单实例，
 # 不设 PDB（设了也没意义；升级时主动 Recreate 策略 + 协调 1 节点）
+# ============================================================

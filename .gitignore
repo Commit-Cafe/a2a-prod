@@ -79,6 +79,16 @@ langfuse-data/
 open-webui-data/
 
 # ============================================================
+# workspace 运行时产物（SDLC 工作流 / MCP 落盘的 spec/tech-design/代码）
+# 由 orchestrator/minimax-agent 运行时生成，可重跑产出，不入库
+# 注意：workspace/samples/ 是 P3 e2e 测试夹具（calc.py），需保留 → 用反向忽略
+# ============================================================
+workspace/sdlc/
+workspace/data/
+workspace/tmp/
+!workspace/samples/
+
+# ============================================================
 # K8s 真实 Secret（绝不提交；只用 secrets.yaml.example 作模板）
 # ============================================================
 infra/k8s/secrets.yaml

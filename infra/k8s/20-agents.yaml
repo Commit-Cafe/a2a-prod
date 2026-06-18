@@ -69,9 +69,9 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           env:
-            - name: AGENT_NAME
-              value: "glm-agent"
-            - name: AGENT_PORT
+            # B1 修复（GLM 2026-06-18 review）：pydantic-settings 字段名是 port（无 env_prefix），
+            # 所以 K8s 注入 PORT 而非 AGENT_PORT。AGENT_NAME 删除（name 是 BaseAgent 类属性硬编码）。
+            - name: PORT
               value: "12001"
             - name: LITELLM_BASE_URL
               valueFrom:
@@ -232,9 +232,8 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           env:
-            - name: AGENT_NAME
-              value: "deepseek-agent"
-            - name: AGENT_PORT
+            # B1 修复：见 glm-agent 注释
+            - name: PORT
               value: "12002"
             - name: LITELLM_BASE_URL
               valueFrom:
@@ -392,9 +391,8 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           env:
-            - name: AGENT_NAME
-              value: "minimax-agent"
-            - name: AGENT_PORT
+            # B1 修复：见 glm-agent 注释
+            - name: PORT
               value: "12003"
             - name: LITELLM_BASE_URL
               valueFrom:

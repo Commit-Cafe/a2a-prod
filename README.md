@@ -2,16 +2,16 @@
 
 > 生产级 A2A 多 Agent 协作系统 — 基于 Google ADK + LiteLLM + a2a-sdk
 >
-> **当前阶段**：P0+P1+P2+P3+P4+P5+P6（K8s 部署清单已实装）
-> **状态**：✅ P0~P6 全部完成 / 等待 P6.1（生产化）
-> **版本**：v0.8.0
+> **当前阶段**：P0+P1+P2+P2.1+P3+P4+P5+P6（K8s 部署清单已实装）
+> **状态**：✅ P0~P6 + P2.1 SDLC Workflow 全部完成 / 等待 P6.1（生产化）
+> **版本**：v0.8.1
 
 ---
 
 ## 这是什么？
 
 a2a-prod 是 [原 a2a-agents](D:\trae_Dproject3\a2a) 的生产化重写版本，
-让 GLM-5.1 / DeepSeek / MiniMax-M3 三个国产大模型在标准 A2A 协议下：
+让 GLM-5 / DeepSeek / MiniMax-M3 三个国产大模型在标准 A2A 协议下：
 
 - **可被发现**（标准 Agent Card）
 - **可流式对话**（SSE）
@@ -204,6 +204,7 @@ a2a-prod/
 - **P0** 三 Agent 用 ADK 暴露标准 A2A 协议 + LiteLLM 统一三家国产模型
 - **P1** 3 Agent 容器化 + e2e 测试
 - **P2** LangGraph 编排（4 模式：DIRECT / DECOMPOSE / NEGOTIATION / WORKFLOW）
+- **P2.1** SDLC 研发协作工作流（DeepSeek 产 Spec → GLM 产技术规范 → MiniMax 写码+自测，遇阻 `[NEED_HELP]` 反馈 GLM，单轮上限 N=2；三层防御保证角色边界）
 - **P3** 3 个 MCP server（filesystem / fetch / shell）+ workspace 沙盒
 - **P4** Langfuse v3 自托管 + OTEL trace 双接入（Agent / LiteLLM / Orchestrator）
 - **P5** Open WebUI 用户前端 + Orchestrator OpenAI 兼容层（`/v1/chat/completions`）

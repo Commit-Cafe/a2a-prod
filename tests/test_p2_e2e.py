@@ -66,7 +66,9 @@ def test_direct_mode_requirement_routes_to_deepseek(orchestrator_url: str) -> No
     """PM/CTO 类问题（技术选型）→ DIRECT → deepseek-agent。"""
     response = httpx.post(
         f"{orchestrator_url}/v1/orchestrate",
-        json={"query": "我们需要做技术选型，PostgreSQL 和 MongoDB 哪个更适合存用户画像？请给方案推荐和权衡分析"},
+        json={
+            "query": "我们需要做技术选型，PostgreSQL 和 MongoDB 哪个更适合存用户画像？请给方案推荐和权衡分析"
+        },
         timeout=180.0,
     )
     assert response.status_code == 200

@@ -28,7 +28,7 @@ from observability.langfuse_client import (
     is_langfuse_enabled,
     setup_otlp_env,
 )
-from observability.tracing import trace_node
+from observability.tracing import start_trace, trace_node
 
 # ============================================================
 # 公共 fixture
@@ -93,7 +93,9 @@ class TestIsEnabled:
 class TestSetupOtlpEnv:
     def test_sets_endpoint(self, enabled_env: None) -> None:
         setup_otlp_env()
-        assert os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://langfuse-web:3000/api/public/otel"
+        assert (
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://langfuse-web:3000/api/public/otel"
+        )
 
     def test_sets_auth_header_with_basic_token(self, enabled_env: None) -> None:
         setup_otlp_env()
@@ -107,7 +109,9 @@ class TestSetupOtlpEnv:
     ) -> None:
         monkeypatch.setenv("LANGFUSE_HOST", "http://langfuse-web:3000/")
         setup_otlp_env()
-        assert os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://langfuse-web:3000/api/public/otel"
+        assert (
+            os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://langfuse-web:3000/api/public/otel"
+        )
 
     def test_idempotent(self, enabled_env: None) -> None:
         setup_otlp_env()
@@ -268,11 +272,13 @@ class TestTraceNodeDecorator:
             def langgraph_node(state: dict[str, Any]) -> dict[str, Any]:
                 return {"ok": True}
 
-            result = langgraph_node({
-                "user_query": "hi",
-                "session_id": "sess-42",
-                "user_id": "alice",
-            })
+            result = langgraph_node(
+                {
+                    "user_query": "hi",
+                    "session_id": "sess-42",
+                    "user_id": "alice",
+                }
+            )
 
         assert result == {"ok": True}
         metadata_call: dict[str, Any] = {}
@@ -305,8 +311,117 @@ class TestTraceNodeDecorator:
 
         # 至少有一次 update 调 level=ERROR
         error_calls = [
-            call
-            for call in fake_span.update.call_args_list
-            if call.kwargs.get("level") == "ERROR"
+            call for call in fake_span.update.call_args_list if call.kwargs.get("level") == "ERROR"
         ]
         assert error_calls, f"expected ERROR update, got: {fake_span.update.call_args_list}"
+
+
+# ============================================================
+# start_trace() 函数
+# ============================================================
+
+
+class TestStartTrace:
+    def test_returns_empty_dict_when_disabled(self, disabled_env: None) -> None:
+        ctx = start_trace("test.trace")
+        assert ctx == {}
+
+    def test_returns_trace_id_when_enabled(self, enabled_env: None) -> None:
+        fake_client = MagicMock()
+        fake_trace = MagicMock()
+        fake_trace.trace_id = "trace-abc-123"
+        fake_client.trace = MagicMock(return_value=fake_trace)
+
+        with patch("observability.langfuse_client.get_langfuse_client", return_value=fake_client):
+            ctx = start_trace(
+                "orchestrator.orchestrate",
+                session_id="sess-1",
+                user_id="alice",
+            )
+
+        assert "trace_id" in ctx
+        assert ctx["trace_id"] == "trace-abc-123"
+        fake_client.trace.assert_called_once()
+        trace_kwargs = fake_client.trace.call_args.kwargs
+        assert trace_kwargs["name"] == "orchestrator.orchestrate"
+        assert trace_kwargs["metadata"]["session_id"] == "sess-1"
+        assert trace_kwargs["metadata"]["user_id"] == "alice"
+
+
+# ============================================================
+# trace_node with _trace_context (parent-child)
+# ============================================================
+
+
+class TestTraceNodeWithContext:
+    def test_uses_parent_trace_when_context_present(self, enabled_env: None) -> None:
+        fake_client = MagicMock()
+        fake_trace = MagicMock()
+        fake_span = MagicMock()
+        fake_trace.span = MagicMock()
+        fake_trace.span.return_value.__enter__ = MagicMock(return_value=fake_span)
+        fake_trace.span.return_value.__exit__ = MagicMock(return_value=False)
+        fake_client.trace = MagicMock(return_value=fake_trace)
+
+        with patch("observability.langfuse_client.get_langfuse_client", return_value=fake_client):
+
+            @trace_node(name="test.child_span")
+            def node_func(state: dict[str, Any]) -> dict[str, Any]:
+                return {"done": True}
+
+            result = node_func(
+                {
+                    "user_query": "hi",
+                    "_trace_context": {"trace_id": "trace-xyz-789"},
+                }
+            )
+
+        assert result == {"done": True}
+        fake_client.trace.assert_called_once_with(id="trace-xyz-789")
+        fake_trace.span.assert_called_once_with(name="test.child_span")
+
+    async def test_async_uses_parent_trace(self, enabled_env: None) -> None:
+        fake_client = MagicMock()
+        fake_trace = MagicMock()
+        fake_span = MagicMock()
+        fake_trace.span = MagicMock()
+        fake_trace.span.return_value.__enter__ = MagicMock(return_value=fake_span)
+        fake_trace.span.return_value.__exit__ = MagicMock(return_value=False)
+        fake_client.trace = MagicMock(return_value=fake_trace)
+
+        with patch("observability.langfuse_client.get_langfuse_client", return_value=fake_client):
+
+            @trace_node(name="test.async_child")
+            async def async_node(state: dict[str, Any]) -> dict[str, Any]:
+                return {"async": True}
+
+            result = await async_node(
+                {
+                    "_trace_context": {"trace_id": "trace-async-001"},
+                }
+            )
+
+        assert result == {"async": True}
+        fake_client.trace.assert_called_once_with(id="trace-async-001")
+
+    def test_falls_back_to_standalone_span_without_context(self, enabled_env: None) -> None:
+        fake_client = MagicMock()
+        fake_span = MagicMock()
+        fake_client.start_as_current_observation = MagicMock()
+        fake_client.start_as_current_observation.return_value.__enter__ = MagicMock(
+            return_value=fake_span
+        )
+        fake_client.start_as_current_observation.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
+
+        with patch("observability.langfuse_client.get_langfuse_client", return_value=fake_client):
+
+            @trace_node(name="test.standalone")
+            def node_func(state: dict[str, Any]) -> dict[str, Any]:
+                return {"ok": True}
+
+            result = node_func({"user_query": "hi"})
+
+        assert result == {"ok": True}
+        fake_client.start_as_current_observation.assert_called_once()

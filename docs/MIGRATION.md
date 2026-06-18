@@ -207,7 +207,7 @@ P6 之后如果：
 | 配置项 | 引入版本 | 升级策略 |
 |---|---|---|
 | `LITELLM_MASTER_KEY` | P0 | 改后 MUST 重启所有 LiteLLM / Orchestrator / Agent |
-| `GLM_API_KEY` / `DEEPSEEK_API_KEY` / `MiniMax_API_KEY` | P0 | 改后 MUST 重启 LiteLLM |
+| `GLM_API_KEY` / `DEEPSEEK_API_KEY` / `MINIMAX_API_KEY` | P0 | 改后 MUST 重启 LiteLLM |
 | `LANGFUSE_INIT_*` | P4 | 改后 MUST 重新跑 Langfuse init 脚本 |
 | `ORCHESTRATOR_API_KEY` | P5 | 改后 MUST 重启 Orchestrator + Open WebUI |
 | `MCP_FILESYSTEM_URL` 等 | P3 | 改后 MUST 重启对应 Agent |

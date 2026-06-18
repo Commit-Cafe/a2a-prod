@@ -9,6 +9,7 @@
 - 禁止 shell 元字符：& ; | ` > < $(
 - subprocess.run(shell=False, timeout=30)
 - cwd 必须在 WORKSPACE_ROOT 内（realpath + 前缀校验）
+- 不允许 curl / wget 等网络工具（防止 SSRF）
 """
 
 from __future__ import annotations
@@ -44,6 +45,8 @@ _mcp: FastMCP = FastMCP(
     name="shell-mcp",
     stateless_http=True,
     json_response=True,
+    host=os.environ.get("MCP_SHELL_HOST", "0.0.0.0"),
+    port=int(os.environ.get("MCP_SHELL_PORT", "12103")),
 )
 
 
@@ -149,10 +152,11 @@ async def run_command(
 
 
 def main() -> None:
-    """启动 shell MCP server（Streamable HTTP）。"""
-    port = int(os.environ.get("MCP_SHELL_PORT", "12103"))
-    host = os.environ.get("MCP_SHELL_HOST", "0.0.0.0")
-    _mcp.run(transport="streamable-http", host=host, port=port)  # type: ignore[call-arg]
+    """启动 shell MCP server（Streamable HTTP）。
+
+    host/port 在 FastMCP 构造时传入（mcp SDK 1.28+ 不再支持 run() 的 host/port 参数）。
+    """
+    _mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":

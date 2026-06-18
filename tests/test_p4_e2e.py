@@ -65,9 +65,9 @@ def test_langfuse_sdk_auth_check() -> None:
     """
     from observability.langfuse_client import is_langfuse_enabled
 
-    assert is_langfuse_enabled(), (
-        "LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST 必须已设置"
-    )
+    assert (
+        is_langfuse_enabled()
+    ), "LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST 必须已设置"
     from observability.langfuse_client import health_check
 
     assert health_check() is True, "Langfuse SDK auth_check 失败"

@@ -94,16 +94,20 @@ spec:
                 secretKeyRef:
                   name: a2a-prod-secrets
                   key: DEEPSEEK_API_BASE
-            - name: MiniMax_API_KEY
+            # R3 修复（GLM 2026-06-18 review3）：MiniMax_API_KEY / MiniMax_API_BASE → 全大写
+            # 与 02-configmap.yaml::litellm config + secrets.yaml.example 三方对齐。
+            # 旧名 MiniMax_API_KEY 注入 + Secret key 也是 MiniMax_API_KEY（被 R2 改名为
+            # MINIMAX_API_KEY 后）→ 注入空值 → K8s 下 MiniMax Agent 路由 401。
+            - name: MINIMAX_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: a2a-prod-secrets
-                  key: MiniMax_API_KEY
-            - name: MiniMax_API_BASE
+                  key: MINIMAX_API_KEY
+            - name: MINIMAX_API_BASE
               valueFrom:
                 secretKeyRef:
                   name: a2a-prod-secrets
-                  key: MiniMax_API_BASE
+                  key: MINIMAX_API_BASE
             # P4: Langfuse OTEL 端点（SPEC §3.8.5 401 Bug 防御）
             - name: LANGFUSE_HOST
               valueFrom:

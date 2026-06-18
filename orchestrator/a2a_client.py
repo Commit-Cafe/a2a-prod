@@ -57,11 +57,15 @@ _client: httpx.AsyncClient | None = None
 
 
 def _get_client() -> httpx.AsyncClient:
-    """惰性创建模块级 httpx.AsyncClient。"""
+    """惰性创建模块级 httpx.AsyncClient。
+
+    read timeout 300s：LLM 长任务（如 SDLC 技术规范生成）可能 > 120s，
+    尤其 GLM-4.6 coding 端点单次 pong 约 25s，复杂任务需更宽容的超时。
+    """
     global _client
     if _client is None:
         _client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=10.0),
+            timeout=httpx.Timeout(connect=5.0, read=300.0, write=5.0, pool=10.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
     return _client
@@ -85,7 +89,7 @@ async def message_send(
     agent_base_url: str,
     text: str,
     *,
-    request_id: int = 1,
+    request_id: int | None = None,
     session_id: str | None = None,
     user_id: str | None = None,
 ) -> str:
@@ -94,7 +98,9 @@ async def message_send(
     Args:
         agent_base_url: 下游 Agent 基础 URL，如 ``http://localhost:12001``
         text: 用户 prompt
-        request_id: JSON-RPC request id（默认 1，e2e 用）
+        request_id: JSON-RPC request id。S5 修复（GLM 2026-06-18 review）：
+            默认改为 None → 自动生成 uuid-based 唯一 id（避免 DECOMPOSITION 模式
+            并行调用时三个请求 id 撞车）。e2e 测试可显式传 int。
         session_id: 透传到 Langfuse trace metadata（SPEC §3.8.4）
         user_id: 透传到 Langfuse trace metadata
 
@@ -106,6 +112,15 @@ async def message_send(
         A2AHTTPError: HTTP 非 200
         A2AProtocolError: JSON-RPC error / 缺 result / 解析失败
     """
+    # S5：默认 request_id 走 uuid（JSON-RPC 规范要求 id 唯一，a2a-sdk 0.3.x 服务端目前
+    # 不按 id 去重，但未来中间件可能会复用；先按规范走）。
+    # JSON-RPC 2.0 规范建议 id 用整数，且 ECMA 53-bit 安全整数范围内（避免 JS 精度丢失）；
+    # Python 虽无此限制但 a2a-sdk 透传到 a2a-server 端如果是 JS 实现可能丢精度，所以保守限制。
+    effective_request_id: int = (
+        request_id
+        if request_id is not None
+        else uuid.uuid4().int & ((1 << 53) - 1)
+    )
     payload: dict[str, Any] = {
         "jsonrpc": "2.0",
         "method": "message/send",
@@ -117,10 +132,10 @@ async def message_send(
                 "kind": "message",
             }
         },
-        "id": request_id,
+        "id": effective_request_id,
     }
 
-    log = logger.bind(agent_url=agent_base_url, request_id=request_id, session_id=session_id or "-")
+    log = logger.bind(agent_url=agent_base_url, request_id=effective_request_id, session_id=session_id or "-")
     await log.ainfo("a2a_send_start", text_preview=text[:60])
 
     client = _get_client()

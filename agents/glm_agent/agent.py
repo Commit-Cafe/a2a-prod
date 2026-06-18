@@ -2,7 +2,7 @@
 
 差异点 ONLY：
 - ``name`` = "glm-agent"
-- ``model_name`` = "glm-5.1"（与 LiteLLM config.yaml 对齐）
+- ``model_name`` = "glm-5"（与 LiteLLM config.yaml 对齐；S1 修复统一口径，详见 GLM 2026-06-18 review）
 - ``description``：技术总监 + 代码审查
 - ``skills``：1 个 skill 描述代码评审与质量把关
 - ``default_instruction``：偏代码审查视角的系统提示
@@ -31,12 +31,12 @@ class GLMAgentSettings(BaseAgentSettings):
     继承 BaseAgentSettings，并加 GLM 专属字段（未来如 top_p / temperature 等）。
     """
 
-    glm_model: str = "glm-5.1"
+    glm_model: str = "glm-5"
     """从 .env.prod 读取的 GLM_MODEL，仅做记录；实际 model_name 用类属性。"""
 
 
 class GLMAgent(BaseAgent):
-    """GLM-5.1 技术总监 + 代码审查 A2A Agent。
+    """GLM-5 技术总监 + 代码审查 A2A Agent。
 
     由 ``__main__.py`` 实例化并启动。SPEC §2.2 禁止重写 ``run``。
     """
@@ -57,11 +57,11 @@ class GLMAgent(BaseAgent):
     @property
     def model_name(self) -> str:
         # 与 infra/litellm/config.yaml 的 model_list[0].model_name 一致
-        return "glm-5.1"
+        return "glm-5"
 
     @property
     def description(self) -> str:
-        return "GLM-5.1 技术总监与代码审查 Agent"
+        return "GLM-5 技术总监与代码审查 Agent"
 
     @property
     def skills(self) -> list[AgentSkillSpec]:
@@ -115,7 +115,7 @@ class GLMAgent(BaseAgent):
                 "不要凭空臆测。fetch 仅用于查官方文档或参考资料。"
             )
         return (
-            "你是 GLM Agent，由智谱 GLM-5.1 驱动，在团队中扮演"
+            "你是 GLM Agent，由智谱 GLM-5 驱动，在团队中扮演"
             "「技术总监 + 代码审查」角色。\n\n"
             "【团队定位】\n"
             "- 你不是主力码农（写代码是 MiniMax 的工作）\n"
@@ -139,7 +139,3 @@ class GLMAgent(BaseAgent):
             "- 用户没贴代码时，主动询问要看哪段代码"
             + tools_hint
         )
-
-
-# 方便 ``from agents.glm_agent.agent import agent`` 直接拿到实例（ADK 风格）
-agent = GLMAgent()

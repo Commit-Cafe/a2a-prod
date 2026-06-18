@@ -108,7 +108,7 @@ class ChatCompletionChoice(BaseModel):
 
     index: int = 0
     message: ResponseMessage
-    finish_reason: Literal["stop", "length", "content_filter", "null"] = "stop"
+    finish_reason: Literal["stop", "length", "content_filter"] | None = "stop"
 
 
 class ChatCompletionResponse(BaseModel):
@@ -159,7 +159,7 @@ class StreamChoice(BaseModel):
 
     index: int = 0
     delta: DeltaContent
-    finish_reason: Literal["stop", "length", "content_filter", "null"] | None = None
+    finish_reason: Literal["stop", "length", "content_filter"] | None = None
 
 
 class StreamChunk(BaseModel):
@@ -233,34 +233,53 @@ def list_models() -> ModelListResponse:
     """返回 :class:`ModelListResponse`，列出 3 个可路由 Agent。"""
     now = int(time.time())
     return ModelListResponse(
-        data=[
-            ModelInfo(id=agent, created=now, owned_by="a2a-prod")
-            for agent in SUPPORTED_MODELS
-        ],
+        data=[ModelInfo(id=agent, created=now, owned_by="a2a-prod") for agent in SUPPORTED_MODELS],
     )
 
 
 def extract_user_query(messages: list[ChatMessage]) -> str:
     """从 OpenAI messages 列表中提取用户 query。
 
-    策略（SPEC §3.9.3）：
+    策略（SPEC §3.9.3 + S8 修复）：
 
-    1. 找到最后一条 ``role=user`` 的消息
+    1. 找到最后一条 ``role=user`` 的消息（作为主问题）
     2. 拼接所有 system 消息作为前缀（保留上下文）
-    3. 如果全是 assistant（无 user），返回空串 → 上游 400
+    3. S8 修复：多轮（user 数 ≥ 2）时把历史 user/assistant 拼入，避免 Open WebUI
+       多轮对话"失忆"。**单轮保持向后兼容**（直接返回 system + last_user，
+       不加【当前问题】前缀），避免破坏现有契约测试 + 直调三方 LLM 的 prompt 形态。
+       多轮上下文留 P5.1（带 role 标签的对话历史），本阶段先解决失忆问题。
+    4. 如果全是 assistant（无 user），返回空串 → 上游 400
     """
     system_parts: list[str] = []
+    history: list[tuple[str, str]] = []  # (role, content) 顺序
     last_user_text: str | None = None
     for msg in messages:
         if msg.role == "system":
             system_parts.append(msg.content)
         elif msg.role == "user":
+            history.append(("user", msg.content))
             last_user_text = msg.content
+        elif msg.role == "assistant":
+            history.append(("assistant", msg.content))
+
     if last_user_text is None:
         return ""
+
+    # 单轮（user 数 = 1）→ 向后兼容：不加【对话历史】/【当前问题】块
+    if len(history) <= 1:
+        if system_parts:
+            return "\n".join(system_parts) + "\n\n" + last_user_text
+        return last_user_text
+
+    # 多轮（user 数 ≥ 2）→ S8 新行为：拼历史
+    parts: list[str] = []
     if system_parts:
-        return "\n".join(system_parts) + "\n\n" + last_user_text
-    return last_user_text
+        parts.append("\n".join(system_parts))
+
+    history_lines = [f"[{role}] {content}" for role, content in history[:-1]]
+    parts.append("【对话历史】\n" + "\n".join(history_lines))
+    parts.append(f"【当前问题】\n{last_user_text}")
+    return "\n\n".join(parts)
 
 
 def resolve_target_agent(

@@ -147,12 +147,8 @@ class TestFetchTool:
     async def test_start_index_pagination(self, mock_fetch_html: Any) -> None:
         full = await fetch("https://example.com", max_length=_MAX_FETCH_LENGTH)
         total = full["total_length"]
-        page1 = await fetch(
-            "https://example.com", max_length=10, start_index=0
-        )
-        page2 = await fetch(
-            "https://example.com", max_length=10, start_index=10
-        )
+        page1 = await fetch("https://example.com", max_length=10, start_index=0)
+        page2 = await fetch("https://example.com", max_length=10, start_index=10)
         assert page1["content"] != page2["content"]
         assert page1["start_index"] == 0
         assert page2["start_index"] == 10

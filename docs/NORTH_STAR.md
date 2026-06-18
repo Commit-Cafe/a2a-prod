@@ -44,13 +44,17 @@
 - ❌ **不在主分支硬编码 API Key**：必须走 `.env`
 - ❌ **不做与原 a2a-agents 的双向同步**：两套独立演进
 
-### 3.2 当前阶段（P0+P1）不做
-- ❌ LangGraph 编排（放 P2）
-- ❌ MCP 工具集成（放 P3）
-- ❌ Langfuse trace（放 P4）
-- ❌ Open WebUI 集成（放 P5）
-- ❌ K8s manifest（放 P6）
-- ❌ 自研 Web UI（P5 用 Open WebUI 替代）
+### 3.2 当前阶段（P6.1 生产化）不做
+- ❌ TLS / Ingress / cert-manager（K8s 层）
+- ❌ Sealed Secrets / External Secrets 替换明文 Secret
+- ❌ Prometheus / Grafana / Loki 监控栈
+- ❌ ArgoCD / Flux GitOps 部署
+- ❌ Velero PVC 备份
+- ❌ 多模态 / tool_calls / 真实 token 计数（OpenAI 兼容层 P5.1）
+- ❌ WORKFLOW 模式接入 OpenAI 兼容层（`/v1/chat/completions`，留 P2.2）
+- ❌ 第二个工作流模板 / 动态 workflow 引擎（YAGNI，留 P2.2+ 视需求）
+
+> P2.1 已完成 SDLC 研发协作工作流（DeepSeek→GLM→MiniMax + 反馈回路）。
 
 > **判断标准**：如果某个改动属于上述"不做"范围，即便看起来"顺手做了更好"，
 > 也必须先在 DECISIONS.md 提案，等阶段升级时再讨论。
@@ -131,5 +135,5 @@
 
 ---
 
-**最后更新**：2026-06-05
+**最后更新**：2026-06-17（P2.1 SDLC WORKFLOW 完成实装）
 **作者**：a2a-prod 团队

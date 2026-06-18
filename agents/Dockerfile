@@ -38,6 +38,7 @@ RUN useradd --create-home --shell /bin/bash a2a \
 COPY --chown=a2a:a2a pyproject.toml README.md ./
 COPY --chown=a2a:a2a agents ./agents
 COPY --chown=a2a:a2a host ./host
+COPY --chown=a2a:a2a observability ./observability
 COPY --chown=a2a:a2a orchestrator ./orchestrator
 COPY --chown=a2a:a2a scripts ./scripts
 

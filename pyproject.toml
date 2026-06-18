@@ -1,6 +1,6 @@
 [project]
 name = "a2a-prod"
-version = "0.8.0"
+version = "0.8.1"
 description = "生产级 A2A 多 Agent 协作系统 — Google ADK + LiteLLM + a2a-sdk"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -39,6 +39,9 @@ dependencies = [
     # 工具
     "python-dotenv>=1.0.0,<2.0.0",
     "tenacity>=9.0.0,<10.0.0",            # 重试机制
+
+    # P2: LangGraph 编排引擎（StateGraph / ainvoke）
+    "langgraph>=0.4.0,<1.0.0",
 
     # P3: MCP 工具生态
     # 官方 MCP Python SDK（FastMCP 内置），Streamable HTTP transport
@@ -123,6 +126,7 @@ addopts = [
 markers = [
     "e2e: end-to-end tests requiring docker-compose up",
     "p2_e2e: P2 orchestrator e2e tests (implies e2e + requires orchestrator up)",
+    "p2_1_e2e: P2.1 SDLC workflow e2e tests (implies e2e + requires orchestrator + 3 agents up)",
     "p3_e2e: P3 MCP e2e tests (implies e2e + requires 3 mcp servers + 3 agents up)",
     "p4_e2e: P4 Langfuse e2e tests (implies e2e + requires langfuse-web + 3 agents up)",
     "p5_e2e: P5 Open WebUI e2e tests (implies e2e + requires open-webui + orchestrator up)",
@@ -143,4 +147,4 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["agents", "host", "infra", "orchestrator"]
+packages = ["agents", "host", "infra", "observability", "orchestrator"]

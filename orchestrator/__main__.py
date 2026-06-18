@@ -23,6 +23,7 @@ API：
 from __future__ import annotations
 
 import argparse
+import hmac
 import os
 import sys
 import time
@@ -45,8 +46,8 @@ from orchestrator.openai_compat import (
     ChatCompletionResponse,
     DeltaContent,
     ModelListResponse,
-    StreamChunk,
     StreamChoice,
+    StreamChunk,
 )
 
 logger = structlog.get_logger(__name__)
@@ -127,7 +128,9 @@ def verify_api_key(  # noqa: D401 - 简单 inline 注释
             headers={"WWW-Authenticate": "Bearer"},
         )
     provided = auth[len("Bearer ") :].strip()
-    if provided != expected:
+    # S4 修复（GLM 2026-06-18 review）：用 hmac.compare_digest 做常数时间比较，
+    # 避免时序侧信道爆破 API key。
+    if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid api key",
@@ -189,7 +192,10 @@ def create_app() -> FastAPI:
     # ---- 编排：同步（A2A-native） ----
     @app.post("/v1/orchestrate", response_model=OrchestrateResponse)
     @trace_node(name="orchestrator.endpoint.orchestrate")
-    async def orchestrate_endpoint(req: OrchestrateRequest) -> OrchestrateResponse:
+    async def orchestrate_endpoint(
+        req: OrchestrateRequest,
+        _auth: None = Depends(verify_api_key),
+    ) -> OrchestrateResponse:
         try:
             state = await orchestrate(
                 req.query,
@@ -215,7 +221,10 @@ def create_app() -> FastAPI:
     # ---- 编排：调试模式（返回完整 state） ----
     @app.post("/v1/orchestrate/trace", response_model=TraceResponse)
     @trace_node(name="orchestrator.endpoint.orchestrate_trace")
-    async def orchestrate_trace_endpoint(req: OrchestrateRequest) -> TraceResponse:
+    async def orchestrate_trace_endpoint(
+        req: OrchestrateRequest,
+        _auth: None = Depends(verify_api_key),
+    ) -> TraceResponse:
         try:
             state = await orchestrate(
                 req.query,
@@ -294,7 +303,7 @@ def create_app() -> FastAPI:
 
         # 4. 流式分支
         if req.stream:
-            return _stream_chat_completions(
+            return await _stream_chat_completions(
                 user_query=user_query,
                 effective_model=effective_model,
                 target_agent=target_agent,
@@ -306,6 +315,7 @@ def create_app() -> FastAPI:
                 user_query,
                 session_id=None,
                 user_id=None,
+                target_agent=target_agent or None,  # B3 修复：传 None 时让 classify 路由
             )
         except Exception as e:
             logger.exception("openai_compat_unexpected_error")
@@ -350,18 +360,25 @@ async def _stream_chat_completions(
 
         data: [DONE]
 
-    本阶段策略：一次性跑完 orchestrate()，拿到 final_answer，再按 20 字符一块
+    本阶段策略：一次性跑完 orchestrate()，拿到 final_answer，再按 100 字符一块
     流式推送给客户端（模拟 streaming）。P5.1 升级到真正 incremental（SPEC §3.9.4）。
+
+    S3 修复（GLM 2026-06-18 review）：调用 orchestrate() 之前先 yield 一个 SSE
+    注释心跳 ``: keepalive\\n\\n``，避免 Open WebUI 在长任务期间触发 read timeout。
     """
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created_ts = int(time.time())
 
     async def event_source() -> AsyncIterator[str]:
+        # S3 修复（GLM 2026-06-18 review）：先 yield 一个 SSE 注释心跳（``: keepalive``），
+        # 避免 Open WebUI 在 orchestrate() 长任务（30-90s）期间触发 read timeout。
+        yield ": keepalive\n\n"
         try:
             state = await orchestrate(
                 user_query,
                 session_id=None,
                 user_id=None,
+                target_agent=target_agent or None,  # B3 修复：见同步分支
             )
         except Exception as e:  # noqa: BLE001
             err_chunk = StreamChunk(
@@ -398,8 +415,8 @@ async def _stream_chat_completions(
         )
         yield f"data: {first_chunk.model_dump_json()}\n\n"
 
-        # 中间块：每 20 字符一段
-        chunk_size = 20
+        # S3 修复：chunk_size 从 20 调到 100，减少 SSE 包数，降低客户端解析压力
+        chunk_size = 100
         for i in range(0, len(final_answer), chunk_size):
             piece = final_answer[i : i + chunk_size]
             chunk = StreamChunk(

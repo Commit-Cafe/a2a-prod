@@ -59,7 +59,11 @@ spec:
           env:
             - name: WORKSPACE_ROOT
               value: "/workspace"
-            - name: MCP_PORT
+            # B2 修复：env 名对齐 mcp_servers/filesystem/server.py 实际读取的
+            # MCP_FILESYSTEM_HOST / MCP_FILESYSTEM_PORT；旧 MCP_PORT 被忽略。
+            - name: MCP_FILESYSTEM_HOST
+              value: "0.0.0.0"
+            - name: MCP_FILESYSTEM_PORT
               value: "12101"
             - name: TZ
               value: UTC
@@ -70,6 +74,11 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+          # B2 修复：readOnlyRootFilesystem=true 时必须显式挂载可写卷到 WORKSPACE_ROOT
+          # 否则 write_file / create_directory 写不进（OSError: Read-only file system）
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -78,6 +87,10 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: a2a-prod-workspace
 ---
 apiVersion: v1
 kind: Service
@@ -150,7 +163,10 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           env:
-            - name: MCP_PORT
+            # B2 修复：见 mcp-filesystem 注释
+            - name: MCP_FETCH_HOST
+              value: "0.0.0.0"
+            - name: MCP_FETCH_PORT
               value: "12102"
             - name: TZ
               value: UTC
@@ -242,7 +258,10 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           env:
-            - name: MCP_PORT
+            # B2 修复：env 名对齐
+            - name: MCP_SHELL_HOST
+              value: "0.0.0.0"
+            - name: MCP_SHELL_PORT
               value: "12103"
             - name: WORKSPACE_ROOT
               value: "/workspace"
@@ -255,6 +274,11 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+          # B2 修复：mcp-shell 只读挂载 workspace（与 docker-compose :ro 对齐）
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+              readOnly: true
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -263,6 +287,10 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: a2a-prod-workspace
 ---
 apiVersion: v1
 kind: Service

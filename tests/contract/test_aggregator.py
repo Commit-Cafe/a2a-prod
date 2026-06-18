@@ -234,3 +234,83 @@ class TestEdgeCases:
     def test_various_text_content(self, text: str) -> None:
         result = aggregate(_state(responses={"glm-agent": text}))
         assert result["final_answer"] == text
+
+
+# ============================================================
+# Test 5：WORKFLOW 模式聚合（P2.1，spec §5.6）
+# ============================================================
+
+
+class TestWorkflowAggregation:
+    """WORKFLOW 模式专属聚合（_aggregate_workflow）。"""
+
+    def _wf_state(
+        self,
+        *,
+        spec: str = "# Spec",
+        tech_design: str = "# Tech",
+        implementation: str = "# Impl",
+        code_paths: list[str] | None = None,
+        feedbacks: list[dict[str, object]] | None = None,
+        rounds: int = 0,
+        errors: list[str] | None = None,
+    ) -> OrchestrationState:
+        from orchestrator.state import OrchestrationMode
+
+        state: OrchestrationState = {
+            "session_id": "s1",
+            "mode": OrchestrationMode.WORKFLOW.value,
+            "sdlc_doc": {
+                "spec": spec,
+                "tech_design": tech_design,
+                "implementation": implementation,
+                "code_paths": code_paths or [],
+            },
+            "sdlc_feedback": feedbacks or [],  # type: ignore[arg-type]
+            "feedback_rounds": rounds,
+            "workflow_status": "running",
+        }
+        if errors is not None:
+            state["errors"] = errors
+        return state
+
+    def test_workflow_aggregation_contains_all_sections(self) -> None:
+        result = aggregate(self._wf_state(code_paths=["sdlc/s1/code/lru.py"]))
+        final = result["final_answer"]
+        assert "📋" in final or "Spec" in final
+        assert "🏗️" in final or "技术规范" in final
+        assert "✅" in final or "实现" in final
+        assert "📁" in final
+        assert "sdlc/s1/code/lru.py" in final
+        assert "📊" in final  # 工作流状态
+
+    def test_workflow_aggregation_includes_feedback(self) -> None:
+        feedbacks = [{"round": 1, "blocker": "阻塞 X", "guidance": "指导 Y"}]
+        result = aggregate(self._wf_state(feedbacks=feedbacks, rounds=1))
+        assert "🔁" in result["final_answer"]
+        assert "阻塞 X" in result["final_answer"]
+        assert "指导 Y" in result["final_answer"]
+
+    def test_workflow_unresolved_marks_status(self) -> None:
+        """达上限仍有 NEED_HELP → status=blocked_unresolved。"""
+        from orchestrator.sdlc_workflow import MAX_FEEDBACK_ROUNDS, NEED_HELP_MARKER
+
+        result = aggregate(
+            self._wf_state(
+                implementation=f"{NEED_HELP_MARKER} 未解决",
+                rounds=MAX_FEEDBACK_ROUNDS,
+            )
+        )
+        assert result["workflow_status"] == "blocked_unresolved"
+        assert "需人工介入" in result["final_answer"]
+
+    def test_workflow_resolved_status(self) -> None:
+        """有反馈但最终无 NEED_HELP → status=blocked_resolved。"""
+        result = aggregate(self._wf_state(rounds=1))
+        assert result["workflow_status"] == "blocked_resolved"
+
+    def test_workflow_no_feedback_status(self) -> None:
+        """无反馈 → blocked_resolved（一次通过）。"""
+        result = aggregate(self._wf_state(rounds=0))
+        assert result["workflow_status"] == "blocked_resolved"
+        assert "一次通过" in result["final_answer"]
