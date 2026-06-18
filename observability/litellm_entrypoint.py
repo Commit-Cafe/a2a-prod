@@ -53,31 +53,27 @@ def main() -> int:
         logger.warning("setup_litellm 失败，继续启动 LiteLLM：%s", e)
 
     # 2. exec litellm CLI（避免包装带来的 signal / PID 隔离问题）
-    from litellm.proxy.proxy_cli import run_server
+    #
+    # S10 修复演进（GLM 2026-06-18 review4 后）：
+    #   旧实现 ``run_server(config=..., port=..., host=...)`` 在新版 LiteLLM
+    #   (main-stable) 里失效——``run_server`` 现在是 Click ``Command`` 对象，
+    #   以函数方式调用时 Click 仍会读 ``sys.argv``，把当前解释器路径当成多余位置参数，
+    #   报 ``Got unexpected extra argument (/app/.venv/bin/python)``。
+    #
+    #   正解：``os.execvp`` 直接接管进程，用 CLI 参数启动 ``litellm``，把控制权
+    #   完全交给 Click。这也与 docstring 所述 "exec 真正的 litellm" 一致。
+    import os
 
-    logger.info("启动 LiteLLM Proxy：config=%s port=%d", args.config, args.port)
-    # S10 修复（GLM 2026-06-18 review）：包 try/except 兜底——run_server 在不同
-    # litellm 版本里可能返回 None / 抛异常 / 调 sys.exit。失败时打 error 上下文再 raise，
-    # 便于排障（之前裸调用只打 traceback，没有"LiteLLM 启动失败"标识）。
-    try:
-        result = run_server(
-            config=args.config,
-            port=args.port,
-            host=args.host,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.error(
-            "litellm_start_failed: %s",
-            e,
-            extra={
-                "config": args.config,
-                "port": args.port,
-                "host": args.host,
-                "error_type": type(e).__name__,
-            },
-        )
-        raise
-    return int(result) if isinstance(result, int) else 0
+    cli = "litellm"
+    cli_args = [
+        cli,
+        "--config", args.config,
+        "--port", str(args.port),
+        "--host", args.host,
+    ]
+    logger.info("启动 LiteLLM Proxy（execvp）：%s", " ".join(cli_args))
+    os.execvp(cli, cli_args)  # 正常情况下不会 return
+    return 0  # 仅为类型完整；execvp 成功则不达此行
 
 
 if __name__ == "__main__":

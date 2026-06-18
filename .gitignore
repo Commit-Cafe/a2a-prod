@@ -100,3 +100,6 @@ infra/k8s/*.decoded.yaml
 # ============================================================
 graphify-out/
 !.gitkeep
+
+# Junk files
+nul
